@@ -47,7 +47,7 @@ LUGARES_TRABAJO_PRINCIPAL = [
 
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 TOLERANCIA_INFERENCIA_MINUTOS = 30 # Tolerancia en minutos para inferir el turno
-JORNADA_SEMANAL_ESTANDAR = timedelta(hours=46) # Jornada estándar semanal
+JORNADA_SEMANAL_ESTANDAR = timedelta(hours=46) # Esta variable se mantiene pero no se usará para este cálculo específico.
 
 # --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas ---
 def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minutos: int):
@@ -131,11 +131,11 @@ def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minuto
     
     return mejor_turno_encontrado if mejor_turno_encontrado else (None, None, None, None)
 
-# --- 4. Función Principal para Calcular Horas Extras ---
+# --- 4. Función Principal para Calcular Horas Extras (ahora solo asignación de turnos) ---
 def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizados: list, tolerancia_minutos: int):
     """
-    Calcula las horas extras de los trabajadores basándose en sus registros
-    de entrada y salida y la definición de turnos.
+    Asigna turnos a los trabajadores basándose en sus registros de entrada y salida
+    y la definición de turnos, sin calcular horas extras.
 
     Args:
         df_registros (pd.DataFrame): DataFrame con los registros de los empleados.
@@ -143,7 +143,7 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
         tolerancia_minutos (int): Minutos de tolerancia para la inferencia de turnos.
 
     Returns:
-        pd.DataFrame: DataFrame con los resultados de las horas extras.
+        pd.DataFrame: DataFrame con los resultados de la asignación de turnos.
     """
     # Filtrar registros por lugares de trabajo principales y tipos de marcación válidos ('ent', 'sal')
     df_filtrado = df_registros[
@@ -191,17 +191,7 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
                     # Calcular las horas trabajadas reales para este par de entrada-salida
                     total_worked_duration_td = salida_time_for_duration - entrada_time
                     total_worked_hours = total_worked_duration_td.total_seconds() / 3600.0
-
-                    # Obtener la duración estándar del turno asignado
-                    duracion_estandar_hrs = detalles_turno["duracion_hrs"]
                     
-                    # Calcular horas extras: tiempo trabajado menos duración estándar del turno
-                    horas_extra = max(0, total_worked_hours - duracion_estandar_hrs)
-
-                    # Aplicar el umbral de 30 minutos (0.5 horas) para considerar horas extras
-                    if horas_extra < 0.5:
-                        horas_extra = 0.0
-
                     # Añadir los resultados a la lista
                     resultados.append({
                         'NOMBRE': nombre_trabajador,
@@ -214,11 +204,8 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
                         'TURNO_ASIGNADO': nombre_turno,                              # Nombre del turno asignado
                         'Inicio_Turno_Programado_Calculado': inicio_turno_calculado.strftime("%Y-%m-%d %H:%M:%S"), # Inicio calculado del turno
                         'Fin_Turno_Programado_Calculado': fin_turno_calculado.strftime("%Y-%m-%d %H:%M:%S"),     # Fin calculado del turno
-                        'Duracion_Turno_Programado_Hrs': duracion_estandar_hrs,      # Duración estándar del turno
+                        'Duracion_Turno_Programado_Hrs': detalles_turno["duracion_hrs"],      # Duración estándar del turno
                         'HORAS_TRABAJADAS_PAR_ENTRADA_SALIDA_HRS': round(total_worked_hours, 2), # Horas trabajadas para este par
-                        'HORAS_EXTRA_HRS': round(horas_extra, 2),                    # Horas extras calculadas
-                        'HORAS_EXTRA_ENTERAS_HRS': int(horas_extra),                 # Horas extras enteras
-                        'MINUTOS_EXTRA_CONVERTIDOS': round((horas_extra - int(horas_extra)) * 60, 2) # Minutos extras
                     })
                     
                     current_entry_record = None # Reiniciar el registro de entrada para el siguiente par
@@ -226,9 +213,9 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
     return pd.DataFrame(resultados)
 
 # --- Interfaz de usuario de Streamlit ---
-st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
-st.title("📊 Calculadora de Horas Extra")
-st.write("Sube tu archivo de Excel para calcular las horas extra de tus trabajadores.")
+st.set_page_config(page_title="Asignación de Turnos", layout="wide")
+st.title("📊 Asignación de Turnos")
+st.write("Sube tu archivo de Excel para ver la asignación de turnos a tus trabajadores.")
 
 uploaded_file = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -260,87 +247,31 @@ if uploaded_file is not None:
             st.success("Archivo cargado y pre-procesado con éxito.")
 
             # Ejecutar el cálculo de horas extras
-            st.subheader("Resultados del Cálculo")
-            df_resultados_diarios = calcular_horas_extra(df_registros.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS)
+            st.subheader("Reporte de Asignación de Turnos por Par Entrada-Salida")
+            # Ya no se pasa 'JORNADA_SEMANAL_ESTANDAR'
+            df_resultados_asignacion = calcular_horas_extra(df_registros.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS)
 
-            if not df_resultados_diarios.empty:
-                # Filtrar solo los registros con horas extras > 0 para el reporte diario
-                df_resultados_diarios_filtrado_extras = df_resultados_diarios[df_resultados_diarios['HORAS_EXTRA_HRS'] > 0].copy()
+            if not df_resultados_asignacion.empty:
+                st.dataframe(df_resultados_asignacion)
 
-                if not df_resultados_diarios_filtrado_extras.empty:
-                    st.write("### Reporte Horas Extra Diarias por Par Entrada-Salida")
-                    st.dataframe(df_resultados_diarios_filtrado_extras)
+                # Opción para descargar el reporte de asignación
+                excel_buffer_asignacion = io.BytesIO()
+                df_resultados_asignacion.to_excel(excel_buffer_asignacion, index=False, engine='openpyxl')
+                excel_buffer_asignacion.seek(0) # Volver al inicio del buffer para la descarga
 
-                    # Opción para descargar el reporte diario
-                    excel_buffer_diario = io.BytesIO()
-                    df_resultados_diarios_filtrado_extras.to_excel(excel_buffer_diario, index=False, engine='openpyxl')
-                    excel_buffer_diario.seek(0) # Volver al inicio del buffer para la descarga
-
-                    st.download_button(
-                        label="Descargar Reporte Horas Extra Diarias (Excel)",
-                        data=excel_buffer_diario,
-                        file_name="reporte_horas_extra_diarias.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                else:
-                    st.info("No se encontraron horas extras diarias para reportar.")
-
-                # Generar Resumen Semanal de Horas Trabajadas y Horas Extra
-                df_resumen_semanal = pd.DataFrame()
-                # Calcular el inicio de la semana (Lunes) para cada fecha de entrada
-                df_resultados_diarios['Semana_Inicio'] = df_resultados_diarios['FECHA_REGISTRO_ENTRADA'].apply(lambda x: pd.to_datetime(x) - timedelta(days=pd.to_datetime(x).weekday()))
-
-                # Agrupar por trabajador y semana para sumar las horas trabajadas
-                df_resumen_semanal = df_resultados_diarios.groupby(['COD_TRABAJADOR', 'NOMBRE', 'Semana_Inicio']).agg(
-                    Horas_Trabajadas_Calculadas_Semana_Hrs=('HORAS_TRABAJADAS_PAR_ENTRADA_SALIDA_HRS', 'sum')
-                ).reset_index()
-
-                # Asegurar que 'Semana_Inicio' es de tipo datetime para operaciones posteriores si fuera necesario
-                df_resumen_semanal['Semana_Inicio'] = pd.to_datetime(df_resumen_semanal['Semana_Inicio'])
-
-                # Calcular horas extras semanales (si exceden la jornada estándar)
-                df_resumen_semanal['Horas_Extra_Semanales_Hrs'] = (
-                    df_resumen_semanal['Horas_Trabajadas_Calculadas_Semana_Hrs'] - (JORNADA_SEMANAL_ESTANDAR.total_seconds() / 3600)
-                ).apply(lambda x: max(0, round(x, 2))) # Asegurar que no haya valores negativos
-
-                # Filtrar solo las semanas con horas extras semanales > 0
-                df_resumen_semanal = df_resumen_semanal[df_resumen_semanal['Horas_Extra_Semanales_Hrs'] > 0].copy()
-
-                # Formatear la columna 'Semana_Inicio' para la visualización
-                df_resumen_semanal['Semana_Inicio'] = df_resumen_semanal['Semana_Inicio'].dt.strftime('%Y-%m-%d')
-                # Redondear las horas trabajadas totales de la semana
-                df_resumen_semanal['Horas_Trabajadas_Calculadas_Semana_Hrs'] = round(df_resumen_semanal['Horas_Trabajadas_Calculadas_Semana_Hrs'], 2)
-
-                # Reordenar columnas para el reporte final
-                df_resumen_semanal = df_resumen_semanal[[
-                    'COD_TRABAJADOR', 'NOMBRE', 'Semana_Inicio',
-                    'Horas_Trabajadas_Calculadas_Semana_Hrs', 'Horas_Extra_Semanales_Hrs',
-                ]]
-
-                if not df_resumen_semanal.empty:
-                    st.write("### Resumen Horas Extra Semanal")
-                    st.dataframe(df_resumen_semanal)
-
-                    # Opción para descargar el resumen semanal
-                    excel_buffer_semanal = io.BytesIO()
-                    df_resumen_semanal.to_excel(excel_buffer_semanal, index=False, engine='openpyxl')
-                    excel_buffer_semanal.seek(0)
-
-                    st.download_button(
-                        label="Descargar Resumen Horas Extra Semanal (Excel)",
-                        data=excel_buffer_semanal,
-                        file_name="resumen_horas_extra_semanal.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                else:
-                    st.info("No se encontraron horas extras semanales para reportar.")
-
+                st.download_button(
+                    label="Descargar Reporte de Asignación de Turnos (Excel)",
+                    data=excel_buffer_asignacion,
+                    file_name="reporte_asignacion_turnos.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
             else:
-                st.warning("No se pudieron calcular horas extras. Asegúrate de que el archivo Excel tenga los datos y formatos correctos y que haya pares de entrada/salida válidos.")
+                st.warning("No se pudieron asignar turnos. Asegúrate de que el archivo Excel tenga los datos y formatos correctos y que haya pares de entrada/salida válidos.")
 
     except Exception as e:
         st.error(f"Ocurrió un error al procesar el archivo: {e}. Asegúrate de que el archivo es un Excel válido y la hoja 'BaseDatos Modificada' existe.")
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ ")
+
 
