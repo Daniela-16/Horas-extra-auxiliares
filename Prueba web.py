@@ -10,17 +10,16 @@ from datetime import datetime, timedelta, time
 import streamlit as st
 import io # Importar io para manejar archivos en memoria
 
-# --- 1. Definición de los Turnos (Turnos Nocturnos Reincorporados) ---
+# --- 1. Definición de los Turnos ---
+# Se han eliminado los turnos nocturnos. Los turnos ahora solo abarcan un día.
 TURNOS = {
     "LV": { # Lunes a Viernes
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
-        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Reincorporado
     },
     "SAB": { # Sábados
         "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
         "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Reincorporado
     }
 }
 
@@ -44,112 +43,106 @@ LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_ING_MENORES_1_SAL","NOEL_MDE_MR_HORNO_4-5_ENT", "NOEL_MDE_MR_HORNO_2-12_ENT",
     "NOEL_MDE_MR_HORNOS_ENT"
 ]
-    
+
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 TOLERANCIA_INFERENCIA_MINUTOS = 30
-JORNADA_SEMANAL_ESTANDAR = timedelta(hours=46)
+# La JORNADA_SEMANAL_ESTANDAR ya no es necesaria al eliminar el cálculo semanal
 
-# --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas (Lógica de Turnos Nocturnos Reincorporada) ---
+# --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas ---
 def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minutos: int):
     dia_de_semana = fecha_hora_registro.weekday()
     tipo_dia = "LV" if dia_de_semana < 5 else "SAB"
 
     mejor_turno_encontrado = None
-    min_diferencia_tiempo = timedelta(days=999)
+    min_diferencia_tiempo = timedelta(days=999) # Se usa un valor grande para asegurar que el primer turno sea el "mejor"
 
     for nombre_turno, detalles_turno in TURNOS[tipo_dia].items():
         hora_inicio_turno_obj = datetime.strptime(detalles_turno["inicio"], "%H:%M:%S").time()
         hora_fin_turno_obj = datetime.strptime(detalles_turno["fin"], "%H:%M:%S").time()
         
-        # Ajustar las horas al estandar de inicio de los turnos. quedan con la misma fecha
-        candidatos_fecha_hora_inicio_turno = [
-            fecha_hora_registro.replace(
-                hour=hora_inicio_turno_obj.hour,
-                minute=hora_inicio_turno_obj.minute,
-                second=hora_inicio_turno_obj.second
-            )
-        ]
-        # Lógica de turno nocturno reincorporada
-        if hora_inicio_turno_obj > hora_fin_turno_obj: # Turno nocturno (ej. 21:40 a 05:40)
-            # Considerar el día anterior como posible inicio para un turno nocturno
-            candidatos_fecha_hora_inicio_turno.append(
-                (fecha_hora_registro - timedelta(days=1)).replace(
-                    hour=hora_inicio_turno_obj.hour,
-                    minute=hora_inicio_turno_obj.minute,
-                    second=hora_inicio_turno_obj.second
-                )
-            )
+        # Ajustar las horas al día del registro.
+        # Ya no se considera un día anterior para turnos nocturnos, ya que se eliminaron.
+        inicio_candidato = fecha_hora_registro.replace(
+            hour=hora_inicio_turno_obj.hour,
+            minute=hora_inicio_turno_obj.minute,
+            second=hora_inicio_turno_obj.second
+        )
+        fin_candidato = fecha_hora_registro.replace(
+            hour=hora_fin_turno_obj.hour,
+            minute=hora_fin_turno_obj.minute,
+            second=hora_fin_turno_obj.second
+        )
+        
+        # Los turnos ya no son nocturnos, así que no se añade un día a la fecha de fin.
+        
+        # Creación de la ventana de tiempo con la tolerancia
+        # Se verifica si el registro cae dentro del turno programado, con la tolerancia aplicada.
+        if not (inicio_candidato - timedelta(minutes=tolerancia_minutos) <= 
+                fecha_hora_registro <= 
+                fin_candidato + timedelta(minutes=tolerancia_minutos)):
+            continue # Si el registro no está dentro de la ventana, se pasa al siguiente turno
 
-        for inicio_candidato in candidatos_fecha_hora_inicio_turno:
-            fin_candidato = inicio_candidato.replace(
-                hour=hora_fin_turno_obj.hour,
-                minute=hora_fin_turno_obj.minute,
-                second=hora_fin_turno_obj.second
-            )
-            
-            # Si el turno es nocturno, se le añade un día a la fecha de fin
-            if hora_inicio_turno_obj > hora_fin_turno_obj:
-                fin_candidato += timedelta(days=1)
-                
-            # Creación de la ventana de tiempo con la tolerancia 
-            if not (inicio_candidato - timedelta(minutes=tolerancia_minutos) <=
-                    fecha_hora_registro <=
-                    fin_candidato + timedelta(minutes=tolerancia_minutos)):
-                continue
-            
-            # fecha_hora_registro pasó la verificación de tolerancia, se calcula la diferencia absoluta 
-            # de tiempo entre el registro del empleado y el inicio_candidato del turno. 
-            # Esto dice qué tan cerca está el registro del inicio del turno.
-            diferencia_tiempo = abs(fecha_hora_registro - inicio_candidato)
+        # El registro pasó la verificación de tolerancia, se calcula la diferencia absoluta
+        # de tiempo entre el registro del empleado y el inicio_candidato del turno.
+        # Esto dice qué tan cerca está el registro del inicio del turno.
+        diferencia_tiempo = abs(fecha_hora_registro - inicio_candidato)
 
-            if mejor_turno_encontrado is None or diferencia_tiempo < min_diferencia_tiempo:
-                mejor_turno_encontrado = (nombre_turno, detalles_turno, inicio_candidato, fin_candidato)
-                min_diferencia_tiempo = diferencia_tiempo
+        # Si no se ha encontrado un turno aún, o si este turno es más cercano, se actualiza.
+        if mejor_turno_encontrado is None or diferencia_tiempo < min_diferencia_tiempo:
+            mejor_turno_encontrado = (nombre_turno, detalles_turno, inicio_candidato, fin_candidato)
+            min_diferencia_tiempo = diferencia_tiempo
 
     return mejor_turno_encontrado if mejor_turno_encontrado else (None, None, None, None)
 
 # --- 4. Función Principal para Calcular Horas Extras ---
 def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizados: list, tolerancia_minutos: int):
+    # Filtrar los registros por lugar de trabajo principal y tipo de marcación (entrada/salida)
     df_filtrado = df_registros[
         (df_registros['PORTERIA_NORMALIZED'].isin(lugares_trabajo_normalizados)) &
         (df_registros['PuntoMarcacion'].isin(['ent', 'sal']))
     ].sort_values(by=['COD_TRABAJADOR', 'FECHA_HORA_PROCESADA'])
 
     if df_filtrado.empty:
-        return pd.DataFrame()
+        return pd.DataFrame() # Retorna un DataFrame vacío si no hay registros que coincidan
 
-    resultados = []
+    resultados = [] # Lista para almacenar los resultados del cálculo de horas extra
 
+    # Agrupar los registros por trabajador y por día para procesarlos individualmente
     for (codigo_trabajador, fecha_dia_base), grupo in df_filtrado.groupby(['COD_TRABAJADOR', df_filtrado['FECHA_HORA_PROCESADA'].dt.date]):
-        nombre_trabajador = grupo['NOMBRE'].iloc[0]
-        entradas = grupo[grupo['PuntoMarcacion'] == 'ent']
-        salidas = grupo[grupo['PuntoMarcacion'] == 'sal']
+        nombre_trabajador = grupo['NOMBRE'].iloc[0] # Obtener el nombre del trabajador
+        entradas = grupo[grupo['PuntoMarcacion'] == 'ent'] # Registros de entrada
+        salidas = grupo[grupo['PuntoMarcacion'] == 'sal'] # Registros de salida
 
         if entradas.empty or salidas.empty:
-            continue
+            continue # Si no hay entradas o salidas para el día, se salta al siguiente grupo
 
+        # Obtener la primera entrada y la última salida del día
         primera_entrada_hora_real = entradas['FECHA_HORA_PROCESADA'].min()
         ultima_salida_hora_real = salidas['FECHA_HORA_PROCESADA'].max()
 
         if ultima_salida_hora_real <= primera_entrada_hora_real:
-            continue
+            continue # Si la salida es anterior o igual a la entrada, se salta
 
-        # Llamada de la función que determina el turno
+        # Llamada a la función que determina el turno para el registro de entrada
         nombre_turno, detalles_turno, inicio_turno_calculado, fin_turno_calculado = \
             obtener_turno_para_registro(primera_entrada_hora_real, tolerancia_minutos)
 
         if nombre_turno is None:
-            continue
+            continue # Si no se pudo determinar un turno, se salta
 
+        # Calcular las horas trabajadas reales del trabajador para ese turno
+        # Se calcula desde el inicio del turno programado hasta la última salida real.
         horas_trabajadas_td = ultima_salida_hora_real - inicio_turno_calculado if ultima_salida_hora_real > inicio_turno_calculado else timedelta(0)
         horas_trabajadas_hrs = horas_trabajadas_td.total_seconds() / 3600
 
-        duracion_estandar_hrs = detalles_turno["duracion_hrs"]
+        duracion_estandar_hrs = detalles_turno["duracion_hrs"] # Duración estándar del turno
+        # Calcular las horas extra (si las hay)
         horas_extra = max(0, horas_trabajadas_hrs - duracion_estandar_hrs)
 
-        if horas_extra < 0.5: # Umbral de 30 minutos
-            horas_extra = 0.0
+        if horas_extra < 0.5: # Umbral de 30 minutos (0.5 horas)
+            horas_extra = 0.0 # Si es menos de 30 minutos, no se considera hora extra
 
+        # Añadir los resultados a la lista
         resultados.append({
             'NOMBRE': nombre_trabajador,
             'COD_TRABAJADOR': codigo_trabajador,
@@ -166,12 +159,12 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
             'HORAS_EXTRA_ENTERAS_HRS': int(horas_extra),
             'MINUTOS_EXTRA_CONVERTIDOS': round((horas_extra - int(horas_extra)) * 60, 2)
         })
-    return pd.DataFrame(resultados)
+    return pd.DataFrame(resultados) # Convertir la lista de resultados a un DataFrame de pandas
 
 # --- Interfaz de usuario de Streamlit ---
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra")
-st.write("Sube tu archivo de Excel para calcular las horas extra de tus trabajadores.")
+st.write("Sube tu archivo de Excel para calcular las horas extra de tus trabajadores (solo turnos diurnos).")
 
 uploaded_file = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -195,100 +188,33 @@ if uploaded_file is not None:
 
             st.success("Archivo cargado y pre-procesado con éxito.")
 
-            # Ejecutar el cálculo
+            # Ejecutar el cálculo de horas extra diarias
             st.subheader("Resultados del Cálculo")
             df_resultados_diarios = calcular_horas_extra(df_registros.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS)
 
             if not df_resultados_diarios.empty:
-                # Filtrar turnos diurnos y nocturnos
-                turnos_nocturnos = ["Turno 3 LV", "Turno 3 SAB"]
+                df_resultados_diarios_filtrado_extras = df_resultados_diarios[df_resultados_diarios['HORAS_EXTRA_HRS'] > 0].copy()
+
+                if not df_resultados_diarios_filtrado_extras.empty:
+                    st.write("### Reporte Horas Extra Diarias")
+                    st.dataframe(df_resultados_diarios_filtrado_extras)
+
+                    # Crear un buffer de Excel en memoria para el reporte diario
+                    excel_buffer_diario = io.BytesIO()
+                    df_resultados_diarios_filtrado_extras.to_excel(excel_buffer_diario, index=False, engine='openpyxl')
+                    excel_buffer_diario.seek(0) # Regresar al inicio del buffer
+
+                    st.download_button(
+                        label="Descargar Reporte Horas Extra Diarias (Excel)",
+                        data=excel_buffer_diario,
+                        file_name="reporte_horas_extra_diarias.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                else:
+                    st.info("No se encontraron horas extras diarias para reportar.")
+
+                # Se ha eliminado la sección de resumen semanal
                 
-                df_resultados_diurnos_extras = df_resultados_diarios[
-                    (df_resultados_diarios['HORAS_EXTRA_HRS'] > 0) & 
-                    (~df_resultados_diarios['TURNO'].isin(turnos_nocturnos))
-                ].copy()
-
-                df_resultados_nocturnos_extras = df_resultados_diarios[
-                    (df_resultados_diarios['HORAS_EXTRA_HRS'] > 0) & 
-                    (df_resultados_diarios['TURNO'].isin(turnos_nocturnos))
-                ].copy()
-
-                # Reporte de Horas Extra Diarias (Diurnas)
-                if not df_resultados_diurnos_extras.empty:
-                    st.write("### Reporte Horas Extra Diarias (Turnos Diurnos)")
-                    st.dataframe(df_resultados_diurnos_extras)
-                else:
-                    st.info("No se encontraron horas extras diarias en turnos diurnos para reportar.")
-
-                # Reporte de Horas Extra Diarias (Nocturnas)
-                if not df_resultados_nocturnos_extras.empty:
-                    st.write("### Reporte Horas Extra Diarias (Turnos Nocturnos)")
-                    st.dataframe(df_resultados_nocturnos_extras)
-                else:
-                    st.info("No se encontraron horas extras diarias en turnos nocturnos para reportar.")
-
-                # Crear un buffer de Excel en memoria para ambos reportes
-                if not df_resultados_diurnos_extras.empty or not df_resultados_nocturnos_extras.empty:
-                    excel_buffer_diario_nocturno = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer_diario_nocturno, engine='openpyxl') as writer:
-                        if not df_resultados_diurnos_extras.empty:
-                            df_resultados_diurnos_extras.to_excel(writer, sheet_name='Horas_Extra_Diurnas', index=False)
-                        if not df_resultados_nocturnos_extras.empty:
-                            df_resultados_nocturnos_extras.to_excel(writer, sheet_name='Horas_Extra_Nocturnas', index=False)
-                    excel_buffer_diario_nocturno.seek(0) # Regresar al inicio del buffer
-
-                    st.download_button(
-                        label="Descargar Reporte Horas Extra Diarias (Diurnas y Nocturnas - Excel)",
-                        data=excel_buffer_diario_nocturno,
-                        file_name="reporte_horas_extra_diarias_diurnas_nocturnas.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                else:
-                    st.info("No hay horas extras (diurnas ni nocturnas) para generar el reporte combinado.")
-
-
-                # Generar Resumen Semanal (sin cambios en la lógica, ya que el resumen es total)
-                df_resumen_semanal = pd.DataFrame()
-                df_resultados_diarios['Semana_Inicio'] = df_resultados_diarios['FECHA'].apply(lambda x: x - timedelta(days=x.weekday()))
-
-                df_resumen_semanal = df_resultados_diarios.groupby(['COD_TRABAJADOR', 'NOMBRE', 'Semana_Inicio']).agg(
-                    Horas_Trabajadas_Calculadas_Semana_Hrs=('HORAS_TRABAJADAS_CALCULADAS_HRS', 'sum')
-                ).reset_index()
-
-                df_resumen_semanal['Semana_Inicio'] = pd.to_datetime(df_resumen_semanal['Semana_Inicio'])
-
-                df_resumen_semanal['Horas_Extra_Semanales_Hrs'] = (
-                    df_resumen_semanal['Horas_Trabajadas_Calculadas_Semana_Hrs'] - (JORNADA_SEMANAL_ESTANDAR.total_seconds() / 3600)
-                ).apply(lambda x: max(0, round(x, 2)))
-
-                df_resumen_semanal = df_resumen_semanal[df_resumen_semanal['Horas_Extra_Semanales_Hrs'] > 0].copy()
-
-                df_resumen_semanal['Semana_Inicio'] = df_resumen_semanal['Semana_Inicio'].dt.strftime('%Y-%m-%d')
-                df_resumen_semanal['Horas_Trabajadas_Calculadas_Semana_Hrs'] = round(df_resumen_semanal['Horas_Trabajadas_Calculadas_Semana_Hrs'], 2)
-
-                df_resumen_semanal = df_resumen_semanal[[
-                    'COD_TRABAJADOR', 'NOMBRE', 'Semana_Inicio',
-                    'Horas_Trabajadas_Calculadas_Semana_Hrs', 'Horas_Extra_Semanales_Hrs',
-                ]]
-
-                if not df_resumen_semanal.empty:
-                    st.write("### Resumen Horas Extra Semanal")
-                    st.dataframe(df_resumen_semanal)
-
-                    # Crear un buffer de Excel en memoria para el resumen semanal
-                    excel_buffer_semanal = io.BytesIO()
-                    df_resumen_semanal.to_excel(excel_buffer_semanal, index=False, engine='openpyxl')
-                    excel_buffer_semanal.seek(0) # Regresar al inicio del buffer
-
-                    st.download_button(
-                        label="Descargar Resumen Horas Extra Semanal (Excel)",
-                        data=excel_buffer_semanal,
-                        file_name="resumen_horas_extra_semanal.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                else:
-                    st.info("No se encontraron horas extras semanales para reportar.")
-
             else:
                 st.warning("No se pudieron calcular horas extras. Asegúrate de que el archivo Excel tenga los datos y formatos correctos.")
 
