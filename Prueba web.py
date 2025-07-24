@@ -137,11 +137,13 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
         primera_entrada_hora_real = entradas['FECHA_HORA_PROCESADA'].min()
         ultima_salida_hora_real = salidas['FECHA_HORA_PROCESADA'].max()
 
-        # Si la última salida es antes o igual a la primera entrada, se salta (datos inconsistentes)
+        # Si la última salida es antes o igual a la primera entrada, se salta (datos inconsistentes).
+        # Esto cubre el escenario de "salida en la madrugada y entrada en la noche del mismo día"
+        # ya que la hora de salida sería cronológicamente anterior a la hora de entrada.
         if ultima_salida_hora_real <= primera_entrada_hora_real:
             continue
         
-        # NUEVA REGLA: Si la duración entre la primera entrada y la última salida es menor a 5 horas,
+        # Regla: Si la duración entre la primera entrada y la última salida es menor a 5 horas,
         # se considera una inconsistencia y se omite este registro.
         if (ultima_salida_hora_real - primera_entrada_hora_real) < timedelta(hours=5):
             # Opcional: Podrías añadir un log aquí para saber qué registros se están omitiendo
@@ -220,12 +222,11 @@ if uploaded_file is not None:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
-                st.warning("No se pudieron asignar turnos. Asegúrate de que el archivo Excel tenga los datos y formatos correctos y que las entradas/salidas no presenten inconsistencias de tiempo.")
+                st.warning("No se pudieron asignar turnos. Esto puede deberse a datos faltantes, formatos incorrectos, o inconsistencias en los registros de entrada y salida (como salidas antes de entradas o duraciones muy cortas).")
 
     except Exception as e:
         st.error(f"Ocurrió un error al procesar el archivo: {e}. Asegúrate de que el archivo es un Excel válido y la hoja 'BaseDatos Modificada' existe.")
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ ")
-
 
