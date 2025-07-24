@@ -360,10 +360,10 @@ if uploaded_file is not None:
             df_resultados_diarios = calcular_horas_extra(df_registros.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS)
 
             if not df_resultados_diarios.empty:
+                st.write("### Reporte Horas Extra Diarias (Solo registros con horas extra)")
                 df_resultados_diarios_filtrado_extras = df_resultados_diarios[df_resultados_diarios['HORAS_EXTRA_HRS'] > 0].copy()
 
                 if not df_resultados_diarios_filtrado_extras.empty:
-                    st.write("### Reporte Horas Extra Diarias")
                     st.dataframe(df_resultados_diarios_filtrado_extras)
 
                     # Crear un buffer de Excel en memoria para el reporte diario
@@ -378,9 +378,31 @@ if uploaded_file is not None:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
                 else:
-                    st.info("No se encontraron horas extras diarias para reportar.")
+                    st.info("No se encontraron horas extras diarias que superen el umbral de 30 minutos.")
+
+                # --- Sección para ver TODOS los turnos diarios calculados (con y sin horas extra) ---
+                if not df_resultados_diarios.empty:
+                    st.markdown("---")
+                    with st.expander("Ver todos los turnos diarios calculados (incluyendo sin horas extra)"):
+                        st.write("Aquí puedes ver todos los turnos que se lograron inferir para cada trabajador, incluso si no generaron horas extra.")
+                        st.dataframe(df_resultados_diarios)
+                        
+                        excel_buffer_all_daily = io.BytesIO()
+                        df_resultados_diarios.to_excel(excel_buffer_all_daily, index=False, engine='openpyxl')
+                        excel_buffer_all_daily.seek(0)
+                        st.download_button(
+                            label="Descargar Todos los Turnos Diarios Calculados (Excel)",
+                            data=excel_buffer_all_daily,
+                            file_name="todos_los_turnos_diarios_calculados.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                else:
+                    st.info("No se pudieron calcular turnos diarios para ningún registro válido después del pre-procesamiento.")
+
 
                 # Generar Resumen Semanal
+                st.markdown("---")
+                st.write("### Resumen Horas Extra Semanal")
                 df_resumen_semanal = pd.DataFrame()
                 # La columna 'FECHA' en df_resultados_diarios ya es la fecha de inicio inferida del turno,
                 # lo cual es correcto para agrupar por semana.
@@ -407,7 +429,6 @@ if uploaded_file is not None:
                 ]]
 
                 if not df_resumen_semanal.empty:
-                    st.write("### Resumen Horas Extra Semanal")
                     st.dataframe(df_resumen_semanal)
 
                     # Crear un buffer de Excel en memoria para el resumen semanal
@@ -425,7 +446,7 @@ if uploaded_file is not None:
                     st.info("No se encontraron horas extras semanales para reportar.")
 
             else:
-                st.warning("No se pudieron calcular horas extras. Asegúrate de que el archivo Excel tenga los datos y formatos correctos.")
+                st.warning("No se pudieron calcular horas extras. Asegúrate de que el archivo Excel tenga los datos y formatos correctos y que haya registros válidos de entrada/salida en lugares de trabajo principales.")
 
     except Exception as e:
         st.error(f"Ocurrió un error al procesar el archivo: {e}. Asegúrate de que el archivo es un Excel válido y la hoja 'BaseDatos Modificada' existe.")
