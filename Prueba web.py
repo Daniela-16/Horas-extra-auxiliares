@@ -215,7 +215,7 @@ if uploaded_file is not None:
             df_registros['HORA'] = df_registros['HORA'].astype(str)
             # Combinar FECHA y HORA en un solo campo datetime
             df_registros['FECHA_HORA_PROCESADA'] = df_registros.apply(
-                lambda row: datetime.combine(row['FECHA'].date(), datetime.strptime(str(row['HORA']), "%H:%M").time()), axis=1
+                lambda row: datetime.combine(row['FECHA'].date(), datetime.strptime(str(row['HORA']), "%H:%M:%S").time()), axis=1
             )
             df_registros['PORTERIA_NORMALIZED'] = df_registros['PORTERIA'].astype(str).str.strip().str.lower()
             df_registros['PuntoMarcacion'] = df_registros['PuntoMarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
