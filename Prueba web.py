@@ -140,6 +140,14 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
         # Si la última salida es antes o igual a la primera entrada, se salta (datos inconsistentes)
         if ultima_salida_hora_real <= primera_entrada_hora_real:
             continue
+        
+        # NUEVA REGLA: Si la duración entre la primera entrada y la última salida es menor a 5 horas,
+        # se considera una inconsistencia y se omite este registro.
+        if (ultima_salida_hora_real - primera_entrada_hora_real) < timedelta(hours=5):
+            # Opcional: Podrías añadir un log aquí para saber qué registros se están omitiendo
+            # print(f"Registro omitido para {nombre_trabajador} en {fecha_dia_base} debido a duración menor a 5 horas.")
+            continue
+
 
         # Llama a la función para determinar el turno basado en la primera entrada del día
         nombre_turno, detalles_turno, inicio_turno_calculado, fin_turno_calculado = \
@@ -149,7 +157,6 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
         if nombre_turno is None:
             continue
 
-        # **Se eliminan los cálculos de horas trabajadas y horas extra**
         # Se mantienen los detalles del turno y las horas de entrada/salida reales y ajustadas
 
         resultados.append({
@@ -213,9 +220,7 @@ if uploaded_file is not None:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
-                st.warning("No se pudieron asignar turnos. Asegúrate de que el archivo Excel tenga los datos y formatos correctos.")
-
-            # **Se elimina completamente la sección de Resumen Semanal de Horas Extra**
+                st.warning("No se pudieron asignar turnos. Asegúrate de que el archivo Excel tenga los datos y formatos correctos y que las entradas/salidas no presenten inconsistencias de tiempo.")
 
     except Exception as e:
         st.error(f"Ocurrió un error al procesar el archivo: {e}. Asegúrate de que el archivo es un Excel válido y la hoja 'BaseDatos Modificada' existe.")
