@@ -45,7 +45,7 @@ LUGARES_TRABAJO_PRINCIPAL = [
 ]
 
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
-TOLERANCIA_INFERENCIA_MINUTOS = 30
+TOLERANCIA_INFERENCIA_MINUTOS = 90
 # La JORNADA_SEMANAL_ESTANDAR ya no es necesaria al eliminar el cálculo semanal
 
 # --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas ---
