@@ -453,3 +453,4 @@ if uploaded_file is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ ")
+
