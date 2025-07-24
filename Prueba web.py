@@ -48,6 +48,7 @@ LUGARES_TRABAJO_PRINCIPAL = [
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 TOLERANCIA_INFERENCIA_MINUTOS = 30
 JORNADA_SEMANAL_ESTANDAR = timedelta(hours=46) # Esta variable ya no se usará para cálculos de horas extra
+MAX_EXCESO_SALIDA_HRS = 2 # Nueva regla: Si la salida real excede el fin del turno programado por más de X horas, se omite.
 
 # --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas ---
 def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minutos: int):
@@ -137,9 +138,9 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
         primera_entrada_hora_real = entradas['FECHA_HORA_PROCESADA'].min()
         ultima_salida_hora_real = salidas['FECHA_HORA_PROCESADA'].max()
 
-        # Si la última salida es antes o igual a la primera entrada, se salta (datos inconsistentes).
+        # Regla: Si la última salida es antes o igual a la primera entrada, se salta (datos inconsistentes).
         # Esto cubre el escenario de "salida en la madrugada y entrada en la noche del mismo día"
-        # ya que la hora de salida sería cronológicamente anterior a la hora de entrada.
+        # (ej. salida 04:00 del mismo día que una entrada 22:00), ya que la hora de salida sería cronológicamente anterior a la hora de entrada.
         if ultima_salida_hora_real <= primera_entrada_hora_real:
             continue
         
@@ -157,6 +158,12 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
 
         # Si no se pudo determinar un turno, se salta
         if nombre_turno is None:
+            continue
+        
+        # NUEVA REGLA: Si la salida real excede el fin del turno programado por más de MAX_EXCESO_SALIDA_HRS,
+        # se considera una inconsistencia para ese turno específico y se omite el registro.
+        if ultima_salida_hora_real > fin_turno_calculado + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
+            # print(f"Registro omitido para {nombre_trabajador} en {fecha_dia_base} porque la salida ({ultima_salida_hora_real.strftime('%H:%M')}) excede el fin del turno programado ({fin_turno_calculado.strftime('%H:%M')}) por más de {MAX_EXCESO_SALIDA_HRS} horas.")
             continue
 
         # Se mantienen los detalles del turno y las horas de entrada/salida reales y ajustadas
@@ -222,7 +229,7 @@ if uploaded_file is not None:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
-                st.warning("No se pudieron asignar turnos. Esto puede deberse a datos faltantes, formatos incorrectos, o inconsistencias en los registros de entrada y salida (como salidas antes de entradas o duraciones muy cortas).")
+                st.warning("No se pudieron asignar turnos. Esto puede deberse a datos faltantes, formatos incorrectos, o inconsistencias en los registros de entrada y salida (como salidas antes de entradas, duraciones muy cortas, o salidas que exceden demasiado el fin del turno programado).")
 
     except Exception as e:
         st.error(f"Ocurrió un error al procesar el archivo: {e}. Asegúrate de que el archivo es un Excel válido y la hoja 'BaseDatos Modificada' existe.")
