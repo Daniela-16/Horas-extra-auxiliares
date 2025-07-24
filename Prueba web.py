@@ -10,17 +10,17 @@ from datetime import datetime, timedelta, time
 import streamlit as st
 import io # Importar io para manejar archivos en memoria
 
-# --- 1. Definición de los Turnos (Turnos Nocturnos Eliminados) ---
+# --- 1. Definición de los Turnos (Turnos Nocturnos Reincorporados) ---
 TURNOS = {
     "LV": { # Lunes a Viernes
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
-        # "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Eliminado
+        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Reincorporado
     },
     "SAB": { # Sábados
         "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
         "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        # "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Eliminado
+        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Reincorporado
     }
 }
 
@@ -49,7 +49,7 @@ LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUG
 TOLERANCIA_INFERENCIA_MINUTOS = 30
 JORNADA_SEMANAL_ESTANDAR = timedelta(hours=46)
 
-# --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas ---
+# --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas (Lógica de Turnos Nocturnos Reincorporada) ---
 def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minutos: int):
     dia_de_semana = fecha_hora_registro.weekday()
     tipo_dia = "LV" if dia_de_semana < 5 else "SAB"
@@ -69,8 +69,17 @@ def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minuto
                 second=hora_inicio_turno_obj.second
             )
         ]
-        # Se elimina la lógica de turno nocturno aquí.
-        
+        # Lógica de turno nocturno reincorporada
+        if hora_inicio_turno_obj > hora_fin_turno_obj: # Turno nocturno (ej. 21:40 a 05:40)
+            # Considerar el día anterior como posible inicio para un turno nocturno
+            candidatos_fecha_hora_inicio_turno.append(
+                (fecha_hora_registro - timedelta(days=1)).replace(
+                    hour=hora_inicio_turno_obj.hour,
+                    minute=hora_inicio_turno_obj.minute,
+                    second=hora_inicio_turno_obj.second
+                )
+            )
+
         for inicio_candidato in candidatos_fecha_hora_inicio_turno:
             fin_candidato = inicio_candidato.replace(
                 hour=hora_fin_turno_obj.hour,
@@ -78,8 +87,10 @@ def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minuto
                 second=hora_fin_turno_obj.second
             )
             
-            # Se elimina el ajuste de fecha para turnos nocturnos aquí
-            
+            # Si el turno es nocturno, se le añade un día a la fecha de fin
+            if hora_inicio_turno_obj > hora_fin_turno_obj:
+                fin_candidato += timedelta(days=1)
+                
             # Creación de la ventana de tiempo con la tolerancia 
             if not (inicio_candidato - timedelta(minutes=tolerancia_minutos) <=
                     fecha_hora_registro <=
@@ -189,27 +200,54 @@ if uploaded_file is not None:
             df_resultados_diarios = calcular_horas_extra(df_registros.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS)
 
             if not df_resultados_diarios.empty:
-                df_resultados_diarios_filtrado_extras = df_resultados_diarios[df_resultados_diarios['HORAS_EXTRA_HRS'] > 0].copy()
+                # Filtrar turnos diurnos y nocturnos
+                turnos_nocturnos = ["Turno 3 LV", "Turno 3 SAB"]
+                
+                df_resultados_diurnos_extras = df_resultados_diarios[
+                    (df_resultados_diarios['HORAS_EXTRA_HRS'] > 0) & 
+                    (~df_resultados_diarios['TURNO'].isin(turnos_nocturnos))
+                ].copy()
 
-                if not df_resultados_diarios_filtrado_extras.empty:
-                    st.write("### Reporte Horas Extra Diarias")
-                    st.dataframe(df_resultados_diarios_filtrado_extras)
+                df_resultados_nocturnos_extras = df_resultados_diarios[
+                    (df_resultados_diarios['HORAS_EXTRA_HRS'] > 0) & 
+                    (df_resultados_diarios['TURNO'].isin(turnos_nocturnos))
+                ].copy()
 
-                    # Crear un buffer de Excel en memoria para el reporte diario
-                    excel_buffer_diario = io.BytesIO()
-                    df_resultados_diarios_filtrado_extras.to_excel(excel_buffer_diario, index=False, engine='openpyxl')
-                    excel_buffer_diario.seek(0) # Regresar al inicio del buffer
+                # Reporte de Horas Extra Diarias (Diurnas)
+                if not df_resultados_diurnos_extras.empty:
+                    st.write("### Reporte Horas Extra Diarias (Turnos Diurnos)")
+                    st.dataframe(df_resultados_diurnos_extras)
+                else:
+                    st.info("No se encontraron horas extras diarias en turnos diurnos para reportar.")
+
+                # Reporte de Horas Extra Diarias (Nocturnas)
+                if not df_resultados_nocturnos_extras.empty:
+                    st.write("### Reporte Horas Extra Diarias (Turnos Nocturnos)")
+                    st.dataframe(df_resultados_nocturnos_extras)
+                else:
+                    st.info("No se encontraron horas extras diarias en turnos nocturnos para reportar.")
+
+                # Crear un buffer de Excel en memoria para ambos reportes
+                if not df_resultados_diurnos_extras.empty or not df_resultados_nocturnos_extras.empty:
+                    excel_buffer_diario_nocturno = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer_diario_nocturno, engine='openpyxl') as writer:
+                        if not df_resultados_diurnos_extras.empty:
+                            df_resultados_diurnos_extras.to_excel(writer, sheet_name='Horas_Extra_Diurnas', index=False)
+                        if not df_resultados_nocturnos_extras.empty:
+                            df_resultados_nocturnos_extras.to_excel(writer, sheet_name='Horas_Extra_Nocturnas', index=False)
+                    excel_buffer_diario_nocturno.seek(0) # Regresar al inicio del buffer
 
                     st.download_button(
-                        label="Descargar Reporte Horas Extra Diarias (Excel)",
-                        data=excel_buffer_diario,
-                        file_name="reporte_horas_extra_diarias.xlsx",
+                        label="Descargar Reporte Horas Extra Diarias (Diurnas y Nocturnas - Excel)",
+                        data=excel_buffer_diario_nocturno,
+                        file_name="reporte_horas_extra_diarias_diurnas_nocturnas.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
                 else:
-                    st.info("No se encontraron horas extras diarias para reportar.")
+                    st.info("No hay horas extras (diurnas ni nocturnas) para generar el reporte combinado.")
 
-                # Generar Resumen Semanal
+
+                # Generar Resumen Semanal (sin cambios en la lógica, ya que el resumen es total)
                 df_resumen_semanal = pd.DataFrame()
                 df_resultados_diarios['Semana_Inicio'] = df_resultados_diarios['FECHA'].apply(lambda x: x - timedelta(days=x.weekday()))
 
