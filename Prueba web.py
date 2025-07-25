@@ -67,7 +67,7 @@ LUGARES_TRABAJO_PRINCIPAL = [
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 TOLERANCIA_INFERENCIA_MINUTOS = 30
 JORNADA_SEMANAL_ESTANDAR = timedelta(hours=46) # Esta variable ya no se usará para cálculos de horas extra
-MAX_EXCESO_SALIDA_HRS = 2 # Nueva regla: Si la salida real excede el fin del turno programado por más de X horas, se omite.
+MAX_EXCESO_SALIDA_HRS = 3 # Nueva regla: Si la salida real excede el fin del turno programado por más de X horas, se omite.
 
 # --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas ---
 def obtener_turno_para_registro(fecha_hora_registro: datetime, tolerancia_minutos: int):
@@ -218,9 +218,9 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
     return pd.DataFrame(resultados)
 
 # --- Interfaz de usuario de Streamlit ---
-st.set_page_config(page_title="Calculadora de Turnos", layout="wide") # Cambiado el título de la página
-st.title("📊 Asignación de Turnos") # Cambiado el título de la aplicación
-st.write("Sube tu archivo de Excel para ver la asignación de turnos de tus trabajadores.")
+st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide") # Cambiado el título de la página
+st.title("📊 Calculadora de Horas Extra") # Cambiado el título de la aplicación
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal.")
 
 uploaded_file = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -233,7 +233,7 @@ if uploaded_file is not None:
         if not all(col in df_registros.columns for col in columnas_requeridas):
             st.error(f"ERROR: Faltan columnas requeridas en la hoja 'BaseDatos Modificada'. Asegúrate de que existan: {', '.join(columnas_requeridas)}")
         else:
-            # Preparación de datos consolidada
+            # Leer las columnas que necesita en el formato requerido
             df_registros['FECHA'] = pd.to_datetime(df_registros['FECHA'])
             df_registros['HORA'] = df_registros['HORA'].astype(str)
             df_registros['FECHA_HORA_PROCESADA'] = pd.to_datetime(df_registros['FECHA'].dt.strftime('%Y-%m-%d') + ' ' + df_registros['HORA'])
@@ -244,12 +244,12 @@ if uploaded_file is not None:
 
             st.success("Archivo cargado y pre-procesado con éxito.")
 
-            # Ejecutar el cálculo (ahora solo asigna turnos)
-            st.subheader("Resultados de la Asignación de Turnos")
+            # Ejecutar el cálculo
+            st.subheader("Resultados de las horas extra")
             df_resultados_diarios = calcular_horas_extra(df_registros.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS)
 
             if not df_resultados_diarios.empty:
-                st.write("### Reporte de Asignación de Turnos Diarios")
+                st.write("### Reporte de Horas trabajadas y horas extra")
                 st.dataframe(df_resultados_diarios)
 
                 # Crear un buffer de Excel en memoria para el reporte diario
@@ -258,9 +258,9 @@ if uploaded_file is not None:
                 excel_buffer_diario.seek(0) # Regresar al inicio del buffer
 
                 st.download_button(
-                    label="Descargar Reporte de Asignación de Turnos (Excel)",
+                    label="Descargar Reporte de Horas extra (Excel)",
                     data=excel_buffer_diario,
-                    file_name="reporte_asignacion_turnos.xlsx",
+                    file_name="reporte_horas_extra.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
