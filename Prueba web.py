@@ -184,6 +184,17 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
         if ultima_salida_hora_real > fin_turno_calculado + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
             # print(f"Registro omitido para {nombre_trabajador} en {fecha_dia_base} porque la salida ({ultima_salida_hora_real.strftime('%H:%M')}) excede el fin del turno programado ({fin_turno_calculado.strftime('%H:%M')}) por más de {MAX_EXCESO_SALIDA_HRS} horas.")
             continue
+        # Calcular duración real trabajada
+        duracion_real = ultima_salida_hora_real - primera_entrada_hora_real
+        horas_trabajadas = round(duracion_real.total_seconds() / 3600, 2)
+        
+        # Duración estándar del turno
+        horas_turno = detalles_turno["duracion_hrs"]
+        horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
+        
+        # Dividir horas extra en entero y minutos
+        horas_extra_enteras = int(horas_extra)
+        minutos_extra = round((horas_extra - horas_extra_enteras) * 60)
 
         # Se mantienen los detalles del turno y las horas de entrada/salida reales y ajustadas
 
@@ -197,7 +208,12 @@ def calcular_horas_extra(df_registros: pd.DataFrame, lugares_trabajo_normalizado
             'Fin_Turno_Programado': fin_turno_calculado.strftime("%H:%M:%S"),
             'Duracion_Turno_Programado_Hrs': detalles_turno["duracion_hrs"], # Duración estándar del turno
             'ENTRADA_AJUSTADA': inicio_turno_calculado.strftime("%Y-%m-%d %H:%M:%S"),
-            'SALIDA_REAL': ultima_salida_hora_real.strftime("%Y-%m-%d %H:%M:%S")
+            'SALIDA_REAL': ultima_salida_hora_real.strftime("%Y-%m-%d %H:%M:%S"),
+            'Horas_Trabajadas': horas_trabajadas,
+            'Horas_Extra': horas_extra,
+            'Horas_Extra_Enteras': horas_extra_enteras,
+            'Minutos_Extra': minutos_extra
+            
         })
     return pd.DataFrame(resultados)
 
