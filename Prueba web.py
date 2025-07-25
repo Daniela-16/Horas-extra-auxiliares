@@ -65,7 +65,7 @@ LUGARES_TRABAJO_PRINCIPAL = [
 ]
     
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
-TOLERANCIA_INFERENCIA_MINUTOS = 30
+TOLERANCIA_INFERENCIA_MINUTOS = 50
 MAX_EXCESO_SALIDA_HRS = 3 # Nueva regla: Si la salida real excede el fin del turno programado por más de X horas, se omite.
 
 # --- 3. Función para determinar el turno y sus horas de inicio/fin ajustadas ---
