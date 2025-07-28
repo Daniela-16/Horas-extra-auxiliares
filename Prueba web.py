@@ -16,12 +16,12 @@ TURNOS = {
     "LV": { # Lunes a Viernes
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
-        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno que cruza la medianoche
+        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno
     },
     "SAB": { # Sábado
         "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
         "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno que cruza la medianoche
+        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno
     }
 }
 
@@ -47,35 +47,32 @@ LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_MR_HORNOS_SAL", "NOEL_MDE_ING_MENORES_1_ENT",
     "NOEL_MDE_MR_HORNO_7-10_SAL", "NOEL_MDE_MR_HORNO_7-10_ENT"
 ]
-# Normaliza los nombres de los lugares de trabajo para facilitar comparaciones (minúsculas, sin espacios extra).
+# Normaliza los nombres de los lugares de trabajo (minúsculas, sin espacios extra).
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 
-# Tolerancia en minutos para inferir si una marcación está cerca del inicio/fin de un turno.
+# Tolerancia en minutos
 TOLERANCIA_INFERENCIA_MINUTOS = 50
 # Límite máximo de horas que una salida puede exceder el fin de turno programado.
 MAX_EXCESO_SALIDA_HRS = 3
 # Hora de corte para determinar la 'fecha clave de turno' para turnos nocturnos.
-# Las marcaciones antes de esta hora se asocian al día de turno anterior.
-# Se ajusta a 06:00:00 para asegurar que salidas de turnos nocturnos (hasta 05:40)
+# Las marcaciones de salida antes de esta hora se asocian al día de turno anterior.
+# Se ajusta a 07:00:00 para asegurar que salidas de turnos nocturnos (hasta 05:40)
 # sean correctamente asignadas al día de turno anterior.
-HORA_CORTE_NOCTURNO = datetime.strptime("06:00:00", "%H:%M:%S").time()
+HORA_CORTE_NOCTURNO = datetime.strptime("07:00:00", "%H:%M:%S").time()
 
 # --- 3. Obtener turno basado en fecha y hora ---
 def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos: int):
     """
-    Identifica el turno programado más probable al que pertenece una marcación de evento.
-    Maneja turnos que cruzan la medianoche.
-
     Parámetros:
-    - fecha_hora_evento (datetime): La fecha y hora de la marcación (usualmente la entrada).
-    - tolerancia_minutos (int): Minutos de flexibilidad alrededor del inicio/fin del turno.
+    - fecha_hora_evento (datetime): La fecha y hora de la marcación de la entrada
+    - tolerancia_minutos (int): Minutos de flexibilidad. marcacion antes y después
 
     Retorna:
     - tupla (nombre_turno, info_turno_dict, inicio_turno_programado, fin_turno_programado)
       Si no se encuentra un turno, retorna (None, None, None, None).
     """
     dia_semana = fecha_hora_evento.weekday() # 0=Lunes, 6=Domingo
-    tipo_dia = "LV" if dia_semana < 5 else "SAB" # Determina si es día laboral o sábado
+    tipo_dia = "LV" if dia_semana < 5 else "SAB" 
 
     mejor_turno = None
     menor_diferencia = timedelta(days=999) # Inicializa con una diferencia muy grande
@@ -122,8 +119,6 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos:
 # --- 4. Calculo de horas ---
 def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_minutos: int):
     """
-    Procesa un DataFrame de marcaciones para calcular horas trabajadas y horas extra por empleado y 'día de turno'.
-
     Parámetros:
     - df (pd.DataFrame): DataFrame con marcaciones preprocesadas, incluyendo 'FECHA_CLAVE_TURNO'.
     - lugares_normalizados (list): Lista de porterías válidas (normalizadas).
@@ -163,20 +158,19 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             continue
 
         # Regla 3: Intenta asignar un turno programado a la jornada
-        # La función obtener_turno_para_registro maneja la lógica de turnos nocturnos.
         turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, tolerancia_minutos)
         if turno_nombre is None:
-            continue # Si no se puede asignar un turno, se ignora el grupo
+            continue 
 
         # Regla 4: Valida que la salida real no exceda un límite razonable del fin de turno programado
         # Esto ayuda a filtrar errores de marcación (ej. olvido de marcar salida)
         if salida_real > fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
             continue
 
-        # --- INICIO DE LOS CAMBIOS PARA HORAS TRABAJADAS Y EXTRA ---
+        # --- HORAS TRABAJADAS Y EXTRA ---
         # Definir el inicio efectivo para el cálculo de horas trabajadas y extra:
         # SIEMPRE será el inicio programado del turno, independientemente de la entrada real.
-        inicio_efectivo_calculo = inicio_turno # <-- Este es el cambio principal
+        inicio_efectivo_calculo = inicio_turno 
         
         # Calcular la duración sobre la cual se aplicará la lógica de horas trabajadas y extra
         duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
@@ -186,7 +180,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
         # Las horas extra son la duración efectiva trabajada menos la duración del turno, nunca negativa
         horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
-        # --- FIN DE LOS CAMBIOS PARA HORAS TRABAJADAS Y EXTRA ---
+       
 
         # Añade los resultados a la lista
         resultados.append({
