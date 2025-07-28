@@ -55,9 +55,6 @@ TOLERANCIA_INFERENCIA_MINUTOS = 50
 # Límite máximo de horas que una salida puede exceder el fin de turno programado.
 MAX_EXCESO_SALIDA_HRS = 3
 # Hora de corte para determinar la 'fecha clave de turno' para turnos nocturnos.
-# Las marcaciones de salida antes de esta hora se asocian al día de turno anterior.
-# Se ajusta a 07:00:00 para asegurar que salidas de turnos nocturnos (hasta 05:40)
-# sean correctamente asignadas al día de turno anterior.
 HORA_CORTE_NOCTURNO = datetime.strptime("07:00:00", "%H:%M:%S").time()
 
 # --- 3. Obtener turno basado en fecha y hora ---
