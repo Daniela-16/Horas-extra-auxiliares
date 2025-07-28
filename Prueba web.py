@@ -22,6 +22,11 @@ TURNOS = {
         "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
         "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
         "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno que cruza la medianoche
+    },
+    "DOM": { # Domingo
+        "Turno 1 DOM": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
+        "Turno 2 DOM": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
+        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40:00", "duracion_hrs": 7}, # Turno nocturno que cruza la medianoche
     }
 }
 
@@ -75,7 +80,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos:
       Si no se encuentra un turno, retorna (None, None, None, None).
     """
     dia_semana = fecha_hora_evento.weekday() # 0=Lunes, 6=Domingo
-    tipo_dia = "LV" if dia_semana < 5 else "SAB" # Determina si es día laboral o sábado
+    tipo_dia = "LV" if dia_semana < 5 "SAB" if dia_semana = 5 "DOM" if dia_semana = 6 
 
     mejor_turno = None
     menor_diferencia = timedelta(days=999) # Inicializa con una diferencia muy grande
