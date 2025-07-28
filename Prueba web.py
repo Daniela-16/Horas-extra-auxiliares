@@ -248,7 +248,7 @@ if archivo_excel is not None:
 
                 # Prepara el DataFrame para descarga en formato Excel
                 buffer_excel = io.BytesIO()
-                df_resultado.to_excel(buffer_excel, index=False, engine='openxlpy')
+                df_resultado.to_excel(buffer_excel, index=False, engine='openpyxl') # <-- Corregido aquí
                 buffer_excel.seek(0)
 
                 # Botón de descarga para el usuario
@@ -266,3 +266,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
+
