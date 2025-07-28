@@ -56,7 +56,7 @@ TOLERANCIA_INFERENCIA_MINUTOS = 50
 MAX_EXCESO_SALIDA_HRS = 3
 # Hora de corte para determinar la 'fecha clave de turno' para turnos nocturnos.
 # Las marcaciones antes de esta hora se asocian al día de turno anterior.
-HORA_CORTE_NOCTURNO = datetime.strptime("04:00:00", "%H:%M:%S").time()
+HORA_CORTE_NOCTURNO = datetime.strptime("07:00:00", "%H:%M:%S").time()
 
 # --- 3. Obtener turno basado en fecha y hora ---
 def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos: int):
