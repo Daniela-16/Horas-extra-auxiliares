@@ -173,26 +173,20 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         if salida_real > fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
             continue
 
-        # --- INICIO DE LOS CAMBIOS PARA HORAS EXTRA ---
-        # duracion_real se mantiene para la columna 'Horas_Trabajadas' (tiempo real en el sitio)
-        duracion_real = salida_real - entrada_real
-        horas_trabajadas = round(duracion_real.total_seconds() / 3600, 2)
-
-        # Definir el inicio efectivo para el cálculo de horas extra:
-        # Será el inicio programado del turno, A MENOS que la entrada real del empleado sea posterior.
-        # Esto asegura que no se cuenten horas extra por llegar tarde, pero sí por salir tarde
-        # o por trabajar más allá del fin de turno, incluso si se llegó temprano.
-        inicio_para_calculo_extra = max(entrada_real, inicio_turno)
+        # --- INICIO DE LOS CAMBIOS PARA HORAS TRABAJADAS Y EXTRA ---
+        # Definir el inicio efectivo para el cálculo de horas trabajadas y extra:
+        # SIEMPRE será el inicio programado del turno, independientemente de la entrada real.
+        inicio_efectivo_calculo = inicio_turno # <-- Este es el cambio principal
         
-        # Calcular la duración sobre la cual se aplicará la lógica de horas extra
-        duracion_para_extra = salida_real - inicio_para_calculo_extra
-        horas_trabajadas_para_extra = round(duracion_para_extra.total_seconds() / 3600, 2)
+        # Calcular la duración sobre la cual se aplicará la lógica de horas trabajadas y extra
+        duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
+        horas_trabajadas = round(duracion_efectiva_calculo.total_seconds() / 3600, 2) # Horas trabajadas desde la hora ajustada
         
         horas_turno = info_turno["duracion_hrs"] # Duración programada del turno asignado
 
-        # Las horas extra son la duración calculada para extras menos la duración del turno, nunca negativa
-        horas_extra = max(0, round(horas_trabajadas_para_extra - horas_turno, 2))
-        # --- FIN DE LOS CAMBIOS PARA HORAS EXTRA ---
+        # Las horas extra son la duración efectiva trabajada menos la duración del turno, nunca negativa
+        horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
+        # --- FIN DE LOS CAMBIOS PARA HORAS TRABAJADAS Y EXTRA ---
 
         # Añade los resultados a la lista
         resultados.append({
@@ -206,7 +200,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             'Duracion_Turno_Programado_Hrs': horas_turno,
             'ENTRADA_REAL': entrada_real.strftime("%Y-%m-%d %H:%M:%S"), # Muestra la entrada real (sin cambiar)
             'SALIDA_REAL': salida_real.strftime("%Y-%m-%d %H:%M:%S"),
-            'Horas_Trabajadas': horas_trabajadas, # Muestra las horas reales entre punches
+            'Horas_Trabajadas': horas_trabajadas, # Ahora muestra las horas calculadas desde la hora ajustada
             'Horas_Extra': horas_extra,
             'Horas_Extra_Enteras': int(horas_extra),
             'Minutos_Extra': round((horas_extra - int(horas_extra)) * 60)
