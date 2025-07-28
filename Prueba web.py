@@ -80,7 +80,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos:
       Si no se encuentra un turno, retorna (None, None, None, None).
     """
     dia_semana = fecha_hora_evento.weekday() # 0=Lunes, 6=Domingo
-    tipo_dia = "LV" if dia_semana < 5 "SAB" if dia_semana = 5 "DOM" if dia_semana = 6 
+    tipo_dia = "LV" if dia_semana < 5 "SAB" if dia_semana = 5 "DOM" else dia_semana = 6 
 
     mejor_turno = None
     menor_diferencia = timedelta(days=999) # Inicializa con una diferencia muy grande
