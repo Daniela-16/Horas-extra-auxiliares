@@ -275,11 +275,14 @@ if archivo_excel is not None:
             def asignar_fecha_clave_turno(row):
                 fecha_original = row['FECHA_HORA'].date()
                 hora_marcacion = row['FECHA_HORA'].time()
+                tipo_marcacion = row['TIPO_MARCACION'] # 'ent' o 'sal'
 
-                # Si la marcación es antes de HORA_CORTE_NOCTURNO (ej. 6 AM),
-                # se asume que forma parte del turno que inició el día anterior.
-                if hora_marcacion < HORA_CORTE_NOCTURNO:
+                # Si la marcación es una SALIDA y su hora es antes de HORA_CORTE_NOCTURNO,
+                # entonces esa salida pertenece al turno que inició el día anterior.
+                if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
                     return fecha_original - timedelta(days=1)
+                # Para ENTRADAS, o SALIDAS que son después de HORA_CORTE_NOCTURNO,
+                # la fecha clave es la fecha de la marcación misma.
                 else:
                     return fecha_original
             
