@@ -16,17 +16,17 @@ TURNOS = {
     "LV": { # Lunes a Viernes
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
-        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno que cruza la medianoche
+        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno 
     },
     "SAB": { # Sábado
         "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
         "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno que cruza la medianoche
+        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno 
     }, 
     "DOM": { # Domingo
         "Turno 1 DOM": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
         "Turno 2 DOM": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40:00", "duracion_hrs": 7}, # Turno nocturno que cruza la medianoche
+        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40:00", "duracion_hrs": 7}, # Turno nocturno
     }
 }
 
@@ -52,26 +52,24 @@ LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_MR_HORNOS_SAL", "NOEL_MDE_ING_MENORES_1_ENT",
     "NOEL_MDE_MR_HORNO_7-10_SAL", "NOEL_MDE_MR_HORNO_7-10_ENT"
 ]
-# Normaliza los nombres de los lugares de trabajo para facilitar comparaciones (minúsculas, sin espacios extra).
+# Normaliza los nombres de los lugares de trabajo (minúsculas, sin espacios extra).
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 
 # Tolerancia en minutos para inferir si una marcación está cerca del inicio/fin de un turno.
 TOLERANCIA_INFERENCIA_MINUTOS = 50
+
 # Límite máximo de horas que una salida puede exceder el fin de turno programado.
 MAX_EXCESO_SALIDA_HRS = 3
+
 # Hora de corte para determinar la 'fecha clave de turno' para turnos nocturnos.
 # Las marcaciones antes de esta hora se asocian al día de turno anterior.
-# Se ajusta a 06:00:00 para asegurar que salidas de turnos nocturnos (hasta 05:40)
-# sean correctamente asignadas al día de turno anterior.
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
 # --- 3. Obtener turno basado en fecha y hora ---
-# AHORA toma un parámetro adicional: fecha_clave_turno_reporte
-def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date, tolerancia_minutos: int):
-    """
-    Identifica el turno programado más probable al que pertenece una marcación de evento.
-    Maneja turnos que cruzan la medianoche.
 
+def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date, tolerancia_minutos: int):
+    
+    """
     Parámetros:
     - fecha_hora_evento (datetime): La fecha y hora de la marcación (usualmente la entrada).
     - fecha_clave_turno_reporte (datetime.date): La fecha lógica del turno (FECHA_CLAVE_TURNO)
@@ -82,7 +80,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     - tupla (nombre_turno, info_turno_dict, inicio_turno_programado, fin_turno_programado)
       Si no se encuentra un turno, retorna (None, None, None, None).
     """
-    # Determinamos el tipo de día usando la FECHA_CLAVE_TURNO_REPORTE, no la fecha_hora_evento directamente
+    
+    # Determinamos el tipo de día usando la FECHA_CLAVE_TURNO_REPORTE, que es la fecha de entrada
     dia_semana_clave = fecha_clave_turno_reporte.weekday() # 0=Lunes, 6=Domingo
     
     if dia_semana_clave < 5: # Lunes a Viernes
@@ -97,9 +96,9 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
         return (None, None, None, None)
 
     mejor_turno = None
-    menor_diferencia = timedelta(days=999) # Inicializa con una diferencia muy grande
+    menor_diferencia = timedelta(days=999) # Inicializa dif grande
 
-    # Itera sobre los turnos definidos para el tipo de día (LV, SAB o DOM)
+    # Itera sobre el diccionario de turnos definidos para el tipo de día (LV, SAB o DOM)
     for nombre_turno, info_turno in TURNOS[tipo_dia].items():
         hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
         hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
