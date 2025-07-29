@@ -22,6 +22,11 @@ TURNOS = {
         "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
         "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
         "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno que cruza la medianoche
+    }, 
+    "DOM": { # Domingo
+        "Turno 1 DOM": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
+        "Turno 2 DOM": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
+        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno que cruza la medianoche
     }
 }
 
@@ -75,12 +80,19 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos:
       Si no se encuentra un turno, retorna (None, None, None, None).
     """
     dia_semana = fecha_hora_evento.weekday() # 0=Lunes, 6=Domingo
-    tipo_dia = "LV" if dia_semana < 5 else "SAB" # Determina si es día laboral o sábado
+    
+    # Determina el tipo de día para seleccionar los turnos correctos
+    if dia_semana < 5: # Lunes a Viernes
+        tipo_dia = "LV"
+    elif dia_semana == 5: # Sábado
+        tipo_dia = "SAB"
+    else: # dia_semana == 6 (Domingo)
+        tipo_dia = "DOM"
 
     mejor_turno = None
     menor_diferencia = timedelta(days=999) # Inicializa con una diferencia muy grande
 
-    # Itera sobre los turnos definidos para el tipo de día (LV o SAB)
+    # Itera sobre los turnos definidos para el tipo de día (LV, SAB o DOM)
     for nombre_turno, info_turno in TURNOS[tipo_dia].items():
         hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
         hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
