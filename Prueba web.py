@@ -66,28 +66,35 @@ MAX_EXCESO_SALIDA_HRS = 3
 HORA_CORTE_NOCTURNO = datetime.strptime("06:00:00", "%H:%M:%S").time()
 
 # --- 3. Obtener turno basado en fecha y hora ---
-def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos: int):
+# AHORA toma un parámetro adicional: fecha_clave_turno_reporte
+def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date, tolerancia_minutos: int):
     """
     Identifica el turno programado más probable al que pertenece una marcación de evento.
     Maneja turnos que cruzan la medianoche.
 
     Parámetros:
     - fecha_hora_evento (datetime): La fecha y hora de la marcación (usualmente la entrada).
+    - fecha_clave_turno_reporte (datetime.date): La fecha lógica del turno (FECHA_CLAVE_TURNO)
+                                                  usada para determinar el tipo de día (LV, SAB, DOM).
     - tolerancia_minutos (int): Minutos de flexibilidad alrededor del inicio/fin del turno.
 
     Retorna:
     - tupla (nombre_turno, info_turno_dict, inicio_turno_programado, fin_turno_programado)
       Si no se encuentra un turno, retorna (None, None, None, None).
     """
-    dia_semana = fecha_hora_evento.weekday() # 0=Lunes, 6=Domingo
+    # Determinamos el tipo de día usando la FECHA_CLAVE_TURNO_REPORTE, no la fecha_hora_evento directamente
+    dia_semana_clave = fecha_clave_turno_reporte.weekday() # 0=Lunes, 6=Domingo
     
-    # Determina el tipo de día para seleccionar los turnos correctos
-    if dia_semana < 5: # Lunes a Viernes
+    if dia_semana_clave < 5: # Lunes a Viernes
         tipo_dia = "LV"
-    elif dia_semana == 5: # Sábado
+    elif dia_semana_clave == 5: # Sábado
         tipo_dia = "SAB"
-    else: # dia_semana == 6 (Domingo)
+    else: # dia_semana_clave == 6 (Domingo)
         tipo_dia = "DOM"
+
+    # Asegurarse de que el tipo_dia exista en TURNOS para evitar KeyError
+    if tipo_dia not in TURNOS:
+        return (None, None, None, None)
 
     mejor_turno = None
     menor_diferencia = timedelta(days=999) # Inicializa con una diferencia muy grande
@@ -98,24 +105,38 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, tolerancia_minutos:
         hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
 
         # Prepara posibles fechas de inicio del turno
-        # El primer candidato es el turno que empieza el mismo día de la marcación
-        candidatos_inicio = [fecha_hora_evento.replace(hour=hora_inicio.hour, minute=hora_inicio.minute, second=hora_inicio.second)]
+        # El primer candidato de inicio debe ser la FECHA_CLAVE_TURNO_REPORTE
+        candidatos_inicio = [datetime.combine(fecha_clave_turno_reporte, hora_inicio)]
 
         # Si el turno es nocturno (ej. 21:00 a 05:00), la marcación podría ser del día siguiente.
-        # Añade un candidato de inicio de turno para el día anterior.
-        if hora_inicio > hora_fin:
-            candidatos_inicio.append((fecha_hora_evento - timedelta(days=1)).replace(hour=hora_inicio.hour, minute=hora_inicio.minute, second=hora_inicio.second))
+        # En este caso, la fecha_clave_turno_reporte ya es el día de inicio lógico.
+        # No necesitamos el día anterior aquí para el inicio_posible_turno
+        # Si la hora de inicio es posterior a la hora de la marcación y la hora de fin es anterior, significa
+        # que el turno nocturno puede empezar en fecha_clave_turno_reporte y terminar al día siguiente.
+        # La lógica de los candidatos_inicio está bien, porque la marcación se puede dar en el día siguiente.
 
-        # Evalúa cada posible inicio de turno
+        # Evalúa cada posible inicio de turno. En este contexto, el principal inicio_posible_turno
+        # es la combinación de la fecha_clave_turno_reporte con la hora de inicio del turno.
         for inicio_posible_turno in candidatos_inicio:
             # Calcula el fin de turno correspondiente al inicio_posible_turno
             fin_posible_turno = inicio_posible_turno.replace(hour=hora_fin.hour, minute=hora_fin.minute, second=hora_fin.second)
-            if hora_inicio > hora_fin:
-                fin_posible_turno += timedelta(days=1) # Ajusta el fin para turnos nocturnos
+            if hora_inicio > hora_fin: # Si es un turno nocturno
+                fin_posible_turno += timedelta(days=1) # El fin ocurre al día siguiente
 
-            # Verifica si la fecha_hora_evento cae dentro del rango del turno con tolerancia
+            # Verifica si la fecha_hora_evento (marcación real) cae dentro del rango del turno con tolerancia
+            # Aquí es donde se compara la marcación real con el rango del turno programado.
             rango_inicio = inicio_posible_turno - timedelta(minutes=tolerancia_minutos)
             rango_fin = fin_posible_turno + timedelta(minutes=tolerancia_minutos)
+
+            # Para turnos nocturnos, la fecha_hora_evento puede ser del día siguiente
+            # Es importante que el rango_inicio pueda extenderse al día anterior si la marcación es muy temprana.
+            # Y el rango_fin pueda extenderse al día siguiente si la marcación es muy tardía.
+            # La marcación (fecha_hora_evento) para un turno nocturno con fecha_clave_turno_reporte = Domingo
+            # podría ser Lunes 00:00:00 como en tu ejemplo.
+            # Entonces, el inicio_posible_turno para Turno 3 DOM (22:40-05:40) sería Domingo 22:40.
+            # Y el fin_posible_turno sería Lunes 05:40.
+            # El rango para la marcación 00:00 del lunes debe ser (Domingo 22:40 - 50min) a (Lunes 05:40 + 50min)
+            # Esto debería funcionar con la lógica actual si el 'fecha_hora_evento' cae dentro de este rango.
 
             if not (rango_inicio <= fecha_hora_evento <= rango_fin):
                 continue # Si no está dentro del rango con tolerancia, salta a la siguiente opción
@@ -175,8 +196,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             continue
 
         # Regla 3: Intenta asignar un turno programado a la jornada
-        # La función obtener_turno_para_registro maneja la lógica de turnos nocturnos.
-        turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, tolerancia_minutos)
+        # ¡IMPORTANTE CAMBIO AQUÍ! Pasamos fecha_clave_turno_reporte a la función
+        turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
         if turno_nombre is None:
             continue # Si no se puede asignar un turno, se ignora el grupo
 
@@ -188,7 +209,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         # --- INICIO DE LOS CAMBIOS PARA HORAS TRABAJADAS Y EXTRA ---
         # Definir el inicio efectivo para el cálculo de horas trabajadas y extra:
         # SIEMPRE será el inicio programado del turno, independientemente de la entrada real.
-        inicio_efectivo_calculo = inicio_turno # <-- Este es el cambio principal
+        inicio_efectivo_calculo = inicio_turno 
         
         # Calcular la duración sobre la cual se aplicará la lógica de horas trabajadas y extra
         duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
