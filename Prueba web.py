@@ -63,7 +63,7 @@ MAX_EXCESO_SALIDA_HRS = 3
 # Las marcaciones antes de esta hora se asocian al día de turno anterior.
 # Se ajusta a 06:00:00 para asegurar que salidas de turnos nocturnos (hasta 05:40)
 # sean correctamente asignadas al día de turno anterior.
-HORA_CORTE_NOCTURNO = datetime.strptime("06:00:00", "%H:%M:%S").time()
+HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
 # --- 3. Obtener turno basado en fecha y hora ---
 # AHORA toma un parámetro adicional: fecha_clave_turno_reporte
