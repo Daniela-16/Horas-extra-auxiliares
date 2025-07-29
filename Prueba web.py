@@ -190,6 +190,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         entrada_real = entradas['FECHA_HORA'].min()
         salida_real = salidas['FECHA_HORA'].max()
 
+        porteria_entrada = entradas[entradas['FECHA_HORA'] == entrada_real]['PORTERIA'].iloc[0] if not entradas.empty else None
+        porteria_salida = salidas[salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0] if not salidas.empty else None
+
         # Regla 2: Valida la consistencia básica de las marcaciones y una duración mínima de jornada
         # Si la salida es antes o igual a la entrada, o la duración total es menor a 5 horas, se ignora.
         if salida_real <= entrada_real or (salida_real - entrada_real) < timedelta(hours=5):
@@ -232,7 +235,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             'Fin_Turno_Programado': fin_turno.strftime("%H:%M:%S"),
             'Duracion_Turno_Programado_Hrs': horas_turno,
             'ENTRADA_REAL': entrada_real.strftime("%Y-%m-%d %H:%M:%S"), # Muestra la entrada real (sin cambiar)
+            'PORTERIA_ENTRADA': porteria_entrada,
             'SALIDA_REAL': salida_real.strftime("%Y-%m-%d %H:%M:%S"),
+            'PORTERIA_SALIDA': porteria_salida,
             'Horas_Trabajadas': horas_trabajadas, # Ahora muestra las horas calculadas desde la hora ajustada
             'Horas_Extra': horas_extra,
             'Horas_Extra_Enteras': int(horas_extra),
