@@ -320,13 +320,13 @@ if archivo_excel is not None:
             if not df_resultado.empty:
                st.subheader("Resultados de las horas extra")
             # 1. Guarda la columna original de booleanos para el formato de Excel
-                df_resultado['_Es_Llegada_Tarde_Para_Formato'] = df_resultado['Llegada_Tarde_Mas_40_Min']
+            df_resultado['_Es_Llegada_Tarde_Para_Formato'] = df_resultado['Llegada_Tarde_Mas_40_Min']
 
             # 2. Renombra la columna 'Llegada_Tarde_Mas_40_Min' a 'Estado_Llegada'
-                df_resultado.rename(columns={'Llegada_Tarde_Mas_40_Min': 'Estado_Llegada'}, inplace=True)
+            df_resultado.rename(columns={'Llegada_Tarde_Mas_40_Min': 'Estado_Llegada'}, inplace=True)
 
             # 3. Mapea los valores True/False a 'Tarde'/'A tiempo' en la columna 'Estado_Llegada'
-                df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
+            df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
            
 
             st.subheader("Resultados de las horas extra")
