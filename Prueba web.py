@@ -318,48 +318,63 @@ if archivo_excel is not None:
             df_resultado = calcular_turnos(df_raw.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS, TOLERANCIA_LLEGADA_TARDE_MINUTOS)
 
             if not df_resultado.empty:
-                st.subheader("Resultados de las horas extra")
-                # Elimina la columna auxiliar antes de mostrarla al usuario
-                st.dataframe(df_resultado.drop(columns=['Llegada_Tarde_Mas_40_Min']))
+               st.subheader("Resultados de las horas extra")
+            # 1. Guarda la columna original de booleanos para el formato de Excel
+                df_resultado['_Es_Llegada_Tarde_Para_Formato'] = df_resultado['Llegada_Tarde_Mas_40_Min']
 
-                # Prepara el DataFrame para descarga en formato Excel
-                buffer_excel = io.BytesIO()
-                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                    df_resultado.to_excel(writer, sheet_name='Reporte Horas Extra', index=False)
+            # 2. Renombra la columna 'Llegada_Tarde_Mas_40_Min' a 'Estado_Llegada'
+                df_resultado.rename(columns={'Llegada_Tarde_Mas_40_Min': 'Estado_Llegada'}, inplace=True)
 
-                    workbook = writer.book
-                    worksheet = writer.sheets['Reporte Horas Extra']
+            # 3. Mapea los valores True/False a 'Tarde'/'A tiempo' en la columna 'Estado_Llegada'
+                df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
+           
 
-                    # Define un formato para el fondo naranja
-                    orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'}) # Naranja claro para resaltar
+            st.subheader("Resultados de las horas extra")
+            # Se muestra el DataFrame modificado en Streamlit, sin la columna auxiliar
+             st.dataframe(df_resultado.drop(columns=['_Es_Llegada_Tarde_Para_Formato']))
 
-                    # Obtiene el índice de la columna para 'ENTRADA_REAL'
-                    try:
-                        entrada_real_col_idx = df_resultado.columns.get_loc('ENTRADA_REAL')
-                    except KeyError:
-                        entrada_real_col_idx = -1 # Columna no encontrada
+            # Prepara el DataFrame para descarga en formato Excel
+            buffer_excel = io.BytesIO()
+            with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                # Exporta el DataFrame sin la columna auxiliar al Excel
+                df_to_excel = df_resultado.drop(columns=['_Es_Llegada_Tarde_Para_Formato']).copy()
+                df_to_excel.to_excel(writer, sheet_name='Reporte Horas Extra', index=False)
 
-                    if entrada_real_col_idx != -1:
-                        # Aplica formato condicional
-                        # Iterando a través de las filas para aplicar el formato basado en 'Llegada_Tarde_Mas_40_Min'
-                        for row_num, is_late in enumerate(df_resultado['Llegada_Tarde_Mas_40_Min']):
-                            if is_late:
-                                # Sumamos 1 a row_num porque ExcelWriter escribe encabezados en la primera fila (fila 0)
-                                worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'], orange_format)
-                            else:
-                                worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'])
+                workbook = writer.book
+                worksheet = writer.sheets['Reporte Horas Extra']
 
-                buffer_excel.seek(0)
+                # Define a format for the orange background
+                orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
 
-                # Botón de descarga para el usuario
-                st.download_button(
-                    label="Descargar Reporte de Horas extra (Excel)",
-                    data=buffer_excel,
-                    file_name="reporte_horas_extra.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-            else:
-                st.warning("No se pudieron asignar turnos o hubo inconsistencias en los registros que cumplieran los criterios de cálculo. Revisa tus datos y las reglas del sistema (por ejemplo, duración mínima de 5 horas o la hora de corte para turnos nocturnos).")
+                # Get the column index for 'ENTRADA_REAL' in the exported DataFrame (df_to_excel)
+                try:
+                    entrada_real_col_idx = df_to_excel.columns.get_loc('ENTRADA_REAL')
+                except KeyError:
+                    entrada_real_col_idx = -1
+
+                if entrada_real_col_idx != -1:
+                    # Aplica formato condicional
+                    # Iterando a través de las filas para aplicar el formato basado en la columna auxiliar
+                    # ¡IMPORTANTE: Usamos df_resultado['_Es_Llegada_Tarde_Para_Formato'] AQUÍ!
+                    for row_num, is_late in enumerate(df_resultado['_Es_Llegada_Tarde_Para_Formato']): # <-- CORRECTED LINE
+                        if is_late:
+                            # Sumamos 1 a row_num porque ExcelWriter escribe encabezados en la primera fila (fila 0)
+                            # También usamos df_resultado para obtener el valor original de ENTRADA_REAL antes de cualquier posible modificación.
+                            worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'], orange_format)
+                        else:
+                            worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'])
+
+            buffer_excel.seek(0)
+
+            # Botón de descarga para el usuario
+            st.download_button(
+                label="Descargar Reporte de Horas extra (Excel)",
+                data=buffer_excel,
+                file_name="reporte_horas_extra.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            st.warning("No se pudieron asignar turnos o hubo inconsistencias en los registros que cumplieran los criterios de cálculo. Revisa tus datos y las reglas del sistema (por ejemplo, duración mínima de 5 horas o la hora de corte para turnos nocturnos).")
 
     except Exception as e:
         st.error(f"Error al procesar el archivo: {e}. Asegúrate de que la hoja se llama 'BaseDatos Modificada' y que tiene todas las columnas requeridas.")
