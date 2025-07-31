@@ -233,7 +233,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         # Regla 2:
         # Si la salida es antes o igual a la entrada, o la duración total es menor a 5 horas, se ignora.
 
-        if salida_real <= entrada_real or (salida_real - entrada_real) < timedelta(hours=5):
+        if salida_real <= entrada_real or (salida_real - entrada_real) < timedelta(hours=4):
             continue
 
         # Regla 3:
