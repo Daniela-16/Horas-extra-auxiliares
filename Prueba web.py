@@ -63,7 +63,7 @@ MAX_EXCESO_SALIDA_HRS = 3
 
 # Hora de corte para determinar la 'fecha clave de turno' para turnos nocturnos.
 # Las marcaciones antes de esta hora se asocian al día de turno anterior.
-HORA_CORTE_NOCTURNO = datetime.strptime("08:00", "%H:%M:%S").time()
+HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
 # Nueva constante para la tolerancia de llegada tarde
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
