@@ -14,19 +14,19 @@ import io
 # Define los horarios de inicio, fin y duración para los turnos diurnos y nocturnos.
 TURNOS = {
     "LV": { # Lunes a Viernes
-        "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
-        "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
-        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno
+        "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40", "duracion_hrs": 8},
+        "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40", "duracion_hrs": 8},
+        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40", "duracion_hrs": 8}, # Turno nocturno
     },
     "SAB": { # Sábado
-        "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
-        "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8}, # Turno nocturno
+        "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40", "duracion_hrs": 6},
+        "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40", "duracion_hrs": 6},
+        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40", "duracion_hrs": 8}, # Turno nocturno
     },
     "DOM": { # Domingo
-        "Turno 1 DOM": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
-        "Turno 2 DOM": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40:00", "duracion_hrs": 7}, # Turno nocturno
+        "Turno 1 DOM": {"inicio": "05:40:00", "fin": "11:40", "duracion_hrs": 6},
+        "Turno 2 DOM": {"inicio": "11:40:00", "fin": "17:40", "duracion_hrs": 6},
+        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40", "duracion_hrs": 7}, # Turno nocturno
     }
 }
 
@@ -63,7 +63,7 @@ MAX_EXCESO_SALIDA_HRS = 3
 
 # Hora de corte para determinar la 'fecha clave de turno' para turnos nocturnos.
 # Las marcaciones antes de esta hora se asocian al día de turno anterior.
-HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
+HORA_CORTE_NOCTURNO = datetime.strptime("08:00", "%H:%M").time()
 
 # Nueva constante para la tolerancia de llegada tarde
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
@@ -103,8 +103,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     # Itera sobre el diccionario de turnos definidos para el tipo de día (LV, SAB o DOM)
     for nombre_turno, info_turno in TURNOS[tipo_dia].items():
-        hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
-        hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
+        hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M").time()
+        hora_fin = datetime.strptime(info_turno["fin"], "%H:%M").time()
 
         # Prepara posibles fechas de inicio del turno
         # El primer candidato de inicio debe ser la FECHA_CLAVE_TURNO_REPORTE
@@ -246,12 +246,12 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             'FECHA': fecha_clave_turno, # Usa la fecha clave de turno para el reporte
             'Dia_Semana': fecha_clave_turno.strftime('%A'), # Día de la semana de la fecha clave de turno
             'TURNO': turno_nombre,
-            'Inicio_Turno_Programado': inicio_turno.strftime("%H:%M:%S"),
-            'Fin_Turno_Programado': fin_turno.strftime("%H:%M:%S"),
+            'Inicio_Turno_Programado': inicio_turno.strftime("%H:%M"),
+            'Fin_Turno_Programado': fin_turno.strftime("%H:%M"),
             'Duracion_Turno_Programado_Hrs': horas_turno,
-            'ENTRADA_REAL': entrada_real.strftime("%Y-%m-%d %H:%M:%S"), # Muestra la entrada real (sin cambiar)
+            'ENTRADA_REAL': entrada_real.strftime("%Y-%m-%d %H:%M"), # Muestra la entrada real (sin cambiar)
             'PORTERIA_ENTRADA': porteria_entrada,
-            'SALIDA_REAL': salida_real.strftime("%Y-%m-%d %H:%M:%S"),
+            'SALIDA_REAL': salida_real.strftime("%Y-%m-%d %H:%M"),
             'PORTERIA_SALIDA': porteria_salida,
             'Horas_Trabajadas': horas_trabajadas, # Ahora muestra las horas calculadas desde la hora ajustada
             'Horas_Extra': horas_extra,
