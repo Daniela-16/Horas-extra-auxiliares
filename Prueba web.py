@@ -260,7 +260,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             diferencia_entrada = entrada_real - inicio_turno
             if diferencia_entrada > timedelta(minutes=tolerancia_llegada_tarde):
                 inicio_efectivo_calculo = entrada_real
-                llegada_tarde_flag = True
+                llegada_tarde = True
 
 
         # Calcular la duración sobre la cual se aplicará la lógica de horas trabajadas y extra
@@ -293,7 +293,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             'Horas_Extra': horas_extra,
             'Horas_Extra_Enteras': int(horas_extra),
             'Minutos_Extra': round((horas_extra - int(horas_extra)) * 60),
-            'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag # Nueva columna para indicar llegada tarde
+            'Estado_Llegada': llegada_tarde 
         })
 
     return pd.DataFrame(resultados) # Retorna los resultados como un DataFrame
@@ -367,13 +367,8 @@ if archivo_excel is not None:
             df_resultado = calcular_turnos(df_raw.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS, TOLERANCIA_LLEGADA_TARDE_MINUTOS)
 
             if not df_resultado.empty:
-                # 1. Guarda la columna original de booleanos para el formato de Excel
-                df_resultado['Llegada_Tarde'] = df_resultado['Llegada_Tarde_Mas_40_Min']
 
-                # 2. Renombra la columna 'Llegada_Tarde_Mas_40_Min' a 'Estado_Llegada'
-                df_resultado.rename(columns={'Llegada_Tarde_Mas_40_Min': 'Estado_Llegada'}, inplace=True)
-
-                # 3. Mapea los valores True/False a 'Tarde'/'A tiempo' en la columna 'Estado_Llegada'
+                #Mapea los valores True/False a 'Tarde'/'A tiempo' en la columna 'Estado_Llegada'
                 df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
 
 
