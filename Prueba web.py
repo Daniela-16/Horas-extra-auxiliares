@@ -105,9 +105,18 @@ LLEGADA_TARDE = 40
 # --- 3. Obtener turno basado en fecha y hora ---
 
 def obtener_turno_por_evento(dt_evento: datetime, fecha_clave_turno: datetime.date, tolerancia_min: int):
+    """
+    Parámetros:
+    - dt_evento (datetime): La fecha y hora de la marcación (usualmente la entrada).
+    - fecha_clave_turno (datetime.date): La fecha lógica del turno (FECHA_CLAVE_TURNO)
+                                         usada para determinar el tipo de día (LV, SAB, DOM).
+    - tolerancia_min (int): Minutos de flexibilidad alrededor del inicio/fin del turno.
 
+    Retorna:
+    - tupla (nombre_turno, info_turno_dict, inicio_turno_programado, fin_turno_programado)
+      Si no se encuentra un turno, retorna (None, None, None, None).
+    """
     # Determina el tipo de día usando la fecha_clave_turno, que es la fecha de entrada
-    
     num_dia_semana = fecha_clave_turno.weekday() # 0=Lunes, 6=Domingo
 
     if num_dia_semana < 5: # Lunes a Viernes
@@ -161,7 +170,16 @@ def obtener_turno_por_evento(dt_evento: datetime, fecha_clave_turno: datetime.da
 # --- 4. Calculo de horas ---
 
 def calcular_horas(df: pd.DataFrame, lugares_norm: list, tolerancia_turnos_min: int, llegada_tarde_min: int):
+    """
+    Parámetros:
+    - df (pd.DataFrame): DataFrame con marcaciones preprocesadas, incluyendo 'FECHA_CLAVE_TURNO'.
+    - lugares_norm (list): Lista de porterías válidas (normalizadas).
+    - tolerancia_turnos_min (int): Tolerancia para la inferencia de turnos.
+    - llegada_tarde_min (int): Minutos de gracia para considerar una llegada tarde.
 
+    Retorna:
+    - pd.DataFrame: Con los resultados de horas trabajadas y extra.
+    """
     # Filtra las marcaciones por los lugares principales y tipos 'ent'/'sal'
     df = df[(df['PORTERIA_NORMALIZADA'].isin(lugares_norm)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))]
 
@@ -175,7 +193,6 @@ def calcular_horas(df: pd.DataFrame, lugares_norm: list, tolerancia_turnos_min: 
 
     # Agrupa por ID de trabajador y por fecha clave de turno
     # Esto permite que los turnos nocturnos que cruzan la medianoche se agrupen en un mismo "listado"
-    
     for (id_trabajador, fecha_clave), grupo in df.groupby(['ID_TRABAJADOR', 'FECHA_CLAVE_TURNO']):
         nombre = grupo['NOMBRE'].iloc[0] #sera el mismo en todo el grupo debido a que se ordenó por nombre
         entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'] # Marcaciones de entrada del grupo
@@ -235,7 +252,7 @@ def calcular_horas(df: pd.DataFrame, lugares_norm: list, tolerancia_turnos_min: 
             'TURNO': nombre_turno,
             'Inicio_Turno_Programado': inicio_turno.strftime("%H:%M:%S"),
             'Fin_Turno_Programado': fin_turno.strftime("%H:%M:%S"),
-            'Duracion_Turno_Programado_Hrs': duracion_turno,
+            'Duracion_Turno_Programado_Hrs': horas_turno, # Corregido: se usa horas_turno aquí
             'ENTRADA_REAL': entrada_real.strftime("%Y-%m-%d %H:%M:%S"), # Muestra la entrada real (sin cambiar)
             'PORTERIA_ENTRADA': porteria_entrada,
             'SALIDA_REAL': salida_real.strftime("%Y-%m-%d %H:%M:%S"),
