@@ -254,7 +254,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
         # --- Lógica de cálculo de horas basada en la nueva regla de llegada tarde ---
         inicio_efectivo_calculo = inicio_turno
-        llegada_tarde_flag = False
+        llegada_tarde = False
 
         if entrada_real > inicio_turno:
             diferencia_entrada = entrada_real - inicio_turno
@@ -374,13 +374,13 @@ if archivo_excel is not None:
 
                 st.subheader("Resultados de las horas extra")
                 # Se muestra el DataFrame modificado en Streamlit, sin la columna auxiliar
-                st.dataframe(df_resultado.drop(columns=['Llegada_Tarde']))
+                st.dataframe(df_resultado.drop(columns=['llegada_Tarde']))
 
                 # Prepara el DataFrame para descarga en formato Excel
                 buffer_excel = io.BytesIO()
                 with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
                     # Exporta el DataFrame sin la columna auxiliar al Excel
-                    df_to_excel = df_resultado.drop(columns=['Llegada_Tarde']).copy()
+                    df_to_excel = df_resultado.drop(columns=['llegada_Tarde']).copy()
                     df_to_excel.to_excel(writer, sheet_name='Reporte Horas Extra', index=False)
 
                     workbook = writer.book
@@ -399,7 +399,7 @@ if archivo_excel is not None:
                         # Aplica formato condicional
                         # Itera a través de las filas para aplicar el formato basado en la columna auxiliar
                       
-                        for row_num, is_late in enumerate(df_resultado['Llegada_Tarde']): 
+                        for row_num, is_late in enumerate(df_resultado['llegada_Tarde']): 
                             if is_late:
                                 # Sumamos 1 a row_num porque ExcelWriter escribe encabezados en la primera fila (fila 0)
                                 # También usamos df_resultado para obtener el valor original de ENTRADA_REAL antes de cualquier posible modificación.
