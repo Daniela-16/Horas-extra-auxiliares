@@ -31,7 +31,7 @@ TURNOS = {
 }
 
 # --- 2. Configuración General ---
-# Lista de lugares de trabajo principales que son relevantes para el cálculo de horas.
+
 LUGARES_TRABAJO_PRINCIPAL = [
    "NOEL_MDE_OFIC_PRODUCCION_ENT",
     "NOEL_MDE_OFIC_PRODUCCION_SAL",
@@ -85,6 +85,7 @@ LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_MR_HORNO_4-5_SAL",
     "NOEL_MDE_ING_MEN_ALERGENOS_SAL"
 ]
+
 # Normaliza los nombres de los lugares de trabajo (minúsculas, sin espacios extra).
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 
@@ -98,7 +99,7 @@ MAX_EXCESO_SALIDA_HRS = 3
 # Las marcaciones antes de esta hora se asocian al día de turno anterior.
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
-# Nueva constante para la tolerancia de llegada tarde
+# Constante para la tolerancia de llegada tarde
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 
 # --- 3. Obtener turno basado en fecha y hora ---
@@ -117,7 +118,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
       Si no se encuentra un turno, retorna (None, None, None, None).
     """
 
-    # Determinamos el tipo de día usando la FECHA_CLAVE_TURNO_REPORTE, que es la fecha de entrada
+    # Determina el tipo de día usando la FECHA_CLAVE_TURNO_REPORTE, que es la fecha de entrada
+    
     dia_semana_clave = fecha_clave_turno_reporte.weekday() # 0=Lunes, 6=Domingo
 
     if dia_semana_clave < 5: # Lunes a Viernes
@@ -135,6 +137,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     menor_diferencia = timedelta(days=999) # Inicializa dif grande
 
     # Itera sobre el diccionario de turnos definidos para el tipo de día (LV, SAB o DOM)
+    
     for nombre_turno, info_turno in TURNOS[tipo_dia].items():
         hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
         hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
@@ -171,7 +174,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
             # Calcula la diferencia absoluta entre la marcación y el inicio programado del turno
             diferencia = abs(fecha_hora_evento - inicio_posible_turno)
 
-            # acrualiza las variables de menor diferencia y de mejor turno
+            # actualiza las variables de menor diferencia y de mejor turno
             if mejor_turno is None or diferencia < menor_diferencia:
                 mejor_turno = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno)
                 menor_diferencia = diferencia
@@ -218,7 +221,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] # Marcaciones de salida del grupo
 
         # Regla 1:
-        # Si no hay entradas o salidas, se ignora el grupo (jornada incompleta)
+        # Si no hay entradas o salidas, se ignora el grupo
 
         if entradas.empty or salidas.empty:
             continue
@@ -231,7 +234,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         porteria_salida = salidas[salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0] if not salidas.empty else None
 
         # Regla 2:
-        # Si la salida es antes o igual a la entrada, o la duración total es menor a 5 horas, se ignora.
+        # Si la salida es antes o igual a la entrada, o la duración total es menor a 4 horas, se ignora.
 
         if salida_real <= entrada_real or (salida_real - entrada_real) < timedelta(hours=4):
             continue
