@@ -291,8 +291,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             'PORTERIA_SALIDA': porteria_salida,
             'Horas_Trabajadas': horas_trabajadas, # Ahora muestra las horas calculadas desde la hora ajustada
             'Horas_Extra': horas_extra,
-            'Horas_Extra_Enteras': int(horas_extra),
-            'Minutos_Extra': round((horas_extra - int(horas_extra)) * 60),
+            'Horas': int(horas_extra),
+            'Minutos': round((horas_extra - int(horas_extra)) * 60),
             'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag # Nueva columna para indicar llegada tarde
         })
 
@@ -418,7 +418,7 @@ if archivo_excel is not None:
                 st.download_button(
                     label="Descargar Reporte de Horas extra (Excel)",
                     data=buffer_excel,
-                    file_name="reporte_horas_extra.xlsx",
+                    file_name="Marcación_horas_extra.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
@@ -429,3 +429,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
+
