@@ -33,7 +33,7 @@ TURNOS = {
 # --- 2. Configuración General ---
 
 LUGARES_TRABAJO_PRINCIPAL = [
-    "NOEL_MDE_OFIC_PRODUCCION_ENT",
+   "NOEL_MDE_OFIC_PRODUCCION_ENT",
     "NOEL_MDE_OFIC_PRODUCCION_SAL",
     "NOEL_MDE_MR_TUNEL_VIENTO_1_ENT",
     "NOEL_MDE_MR_MEZCLAS_ENT",
@@ -113,7 +113,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     Parámetros:
     - fecha_hora_evento (datetime): La fecha y hora de la marcación (usualmente la entrada).
     - fecha_clave_turno_reporte (datetime.date): La fecha lógica del turno (FECHA_CLAVE_TURNO)
-                                                 usada para determinar el tipo de día (LV, SAB, DOM).
+                                                usada para determinar el tipo de día (LV, SAB, DOM).
     - tolerancia_minutos (int): Minutos de flexibilidad alrededor del inicio/fin del turno.
 
     Retorna:
@@ -197,7 +197,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
     - tolerancia_llegada_tarde (int): Minutos de gracia para considerar una llegada tarde.
 
     Retorna:
-    - pd.DataFrame: Con los resultados de horas trabajadas y extra (incluyendo horas extra = 0).
+    - pd.DataFrame: Con los resultados de horas trabajadas y extra.
     """
 
     # Filtra las marcaciones por los lugares principales y tipos 'ent'/'sal'
@@ -222,12 +222,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         nombre = grupo['NOMBRE'].iloc[0] #sera el mismo en todo el grupo debido a que se ordenó por nombre
         entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'] # Marcaciones de entrada del grupo
         salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] # Marcaciones de salida del grupo
-        
-        # OBTENER TODAS LAS MARCAS DE ENTRADA Y SALIDA PARA EL REPORTE COMPLETO
-        
-        todas_entradas = ' | '.join(entradas['FECHA_HORA'].dt.strftime('%H:%M:%S').tolist())
-        todas_salidas = ' | '.join(salidas['FECHA_HORA'].dt.strftime('%H:%M:%S').tolist())
-        
+
         # Regla 1:
         # Si no hay entradas o salidas, se ignora el grupo
 
@@ -248,14 +243,14 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             continue
 
         # Regla 3:
-        # Intenta asignar un turno programado a la jornada
+        #Intenta asignar un turno programado a la jornada
 
         turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
         if turno_nombre is None:
             continue # Si no se puede asignar un turno, se ignora el grupo
 
         # Regla 4:
-        # Valida que la salida real no exceda un límite razonable del fin de turno programado
+        #Valida que la salida real no exceda un límite razonable del fin de turno programado
 
         if salida_real > fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
             continue
@@ -283,7 +278,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
 
 
-        # Añade los resultados a la lista (SE INCLUYEN TODOS LOS REGISTROS VÁLIDOS AQUÍ)
+        # Añade los resultados a la lista
         resultados.append({
             'NOMBRE': nombre,
             'ID_TRABAJADOR': id_trabajador,
@@ -299,21 +294,17 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             'PORTERIA_SALIDA': porteria_salida,
             'Horas_Trabajadas': horas_trabajadas, # Ahora muestra las horas calculadas desde la hora ajustada
             'Horas_Extra': horas_extra,
-            # Se usa el mismo cálculo de horas extra, pero se deja en el reporte
-            'Horas_Extra_Enteras': int(horas_extra),
-            'Minutos_Extra': round((horas_extra - int(horas_extra)) * 60),
-            'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag, # Nueva columna para indicar llegada tarde
-            # Columnas agregadas para el reporte completo de marcaciones:
-            'Todas_Marcaciones_Entrada_Hrs': todas_entradas,
-            'Todas_Marcaciones_Salida_Hrs': todas_salidas,
+            'Horas': int(horas_extra),
+            'Minutos': round((horas_extra - int(horas_extra)) * 60),
+            'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag # Nueva columna para indicar llegada tarde
         })
 
     return pd.DataFrame(resultados) # Retorna los resultados como un DataFrame
 
 # --- Interfaz Streamlit ---
-st.set_page_config(page_title="Reporte de Marcaciones", layout="wide")
-st.title("📊 Reporte Completo de Marcaciones y Horas Trabajadas")
-st.write("Sube tu archivo de Excel para obtener el reporte de marcaciones válidas (incluyendo horas extra).")
+st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
+st.title("📊 Calculadora de Horas Extra")
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal.")
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -327,39 +318,25 @@ if archivo_excel is not None:
         else:
             # Preprocesamiento inicial de columnas
 
-            df_raw['FECHA'] = pd.to_datetime(df_raw['FECHA'], errors='coerce')
-            
-            # --- AJUSTE CLAVE DE MANEJO DE HORA (Más robusto) ---
-            # 1. Limpiar y convertir la columna HORA a string
-            df_raw['HORA_STR'] = df_raw['HORA'].astype(str).str.strip()
+            df_raw['FECHA'] = pd.to_datetime(df_raw['FECHA'])
+            df_raw['HORA'] = df_raw['HORA'].astype(str)
 
-            # 2. Función para estandarizar el formato de hora (añadir segundos si faltan)
+            # Función para asegurar que la hora tenga el formato HH:MM:SS
             def standardize_time_format(time_str):
                 parts = time_str.split(':')
-                if len(parts) == 2:
+                if len(parts) == 2: # El formato es HH:MM, se añaden ':00' para los segundos
                     return f"{time_str}:00"
-                return time_str
+                elif len(parts) == 3: # El formato ya es HH:MM:SS
+                    return time_str
+                else: # Manejar formatos inesperados, se retorna la cadena original
+                    return time_str # Se podría añadir un manejo de errores más robusto si es necesario
 
-            df_raw['HORA_STANDARDIZED'] = df_raw['HORA_STR'].apply(standardize_time_format)
-
-            # 3. Combinar FECHA y HORA de manera más segura usando Series y to_datetime
-            # Asegura que solo se intenten combinar valores válidos de FECHA
-            fecha_valida_mask = df_raw['FECHA'].notna()
+            df_raw['HORA'] = df_raw['HORA'].apply(standardize_time_format)
             
-            df_raw.loc[fecha_valida_mask, 'FECHA_HORA'] = pd.to_datetime(
-                df_raw.loc[fecha_valida_mask, 'FECHA'].dt.strftime('%Y-%m-%d') + ' ' + df_raw.loc[fecha_valida_mask, 'HORA_STANDARDIZED'],
-                errors='coerce' # Si falla la conversión, será NaT
-            )
-            # Rellenar con NaT donde no se pudo combinar
-            df_raw['FECHA_HORA'] = df_raw['FECHA_HORA'].fillna(pd.NaT)
-            # ---------------------------------------------------
-
+            df_raw['FECHA_HORA'] = pd.to_datetime(df_raw['FECHA'].dt.strftime('%Y-%m-%d') + ' ' + df_raw['HORA'])
             df_raw['PORTERIA_NORMALIZADA'] = df_raw['PORTERIA'].astype(str).str.strip().str.lower()
             df_raw['TIPO_MARCACION'] = df_raw['PuntoMarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
             df_raw.rename(columns={'COD_TRABAJADOR': 'ID_TRABAJADOR'}, inplace=True)
-            
-            # Filtrar filas donde la fecha/hora es válida
-            df_raw = df_raw.dropna(subset=['FECHA_HORA'])
 
             # --- LÓGICA: Asignar Fecha Clave de Turno para el agrupamiento ---
 
@@ -393,82 +370,70 @@ if archivo_excel is not None:
             df_resultado = calcular_turnos(df_raw.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS, TOLERANCIA_LLEGADA_TARDE_MINUTOS)
 
             if not df_resultado.empty:
-                # Renombra las columnas de horas extra para el reporte
-                df_resultado.rename(columns={
-                    'Horas_Extra_Enteras': 'Horas',
-                    'Minutos_Extra': 'Minutos',
-                    'Llegada_Tarde_Mas_40_Min': 'Llegada_Tarde_Flag' # Columna auxiliar para formato Excel
-                }, inplace=True)
-                
-                # 1. Prepara la columna booleana para el formato de Excel
-                df_resultado['Llegada_Tarde_Bool'] = df_resultado['Llegada_Tarde_Flag']
-                
-                # 2. Mapea los valores True/False a 'Tarde'/'A tiempo' en la columna 'Estado_Llegada'
-                df_resultado['Estado_Llegada'] = df_resultado['Llegada_Tarde_Flag'].map({True: 'Tarde', False: 'A tiempo'})
-                
-                # 3. Elimina la columna booleana original para la visualización y descarga principal
-                df_resultado.drop(columns=['Llegada_Tarde_Flag'], inplace=True)
+                # 1. Guarda la columna original de booleanos para el formato de Excel
+                df_resultado['Llegada_Tarde'] = df_resultado['Llegada_Tarde_Mas_40_Min']
+
+                # 2. Renombra la columna 'Llegada_Tarde_Mas_40_Min' a 'Estado_Llegada'
+                df_resultado.rename(columns={'Llegada_Tarde_Mas_40_Min': 'Estado_Llegada'}, inplace=True)
+
+                # 3. Mapea los valores True/False a 'Tarde'/'A tiempo' en la columna 'Estado_Llegada'
+                df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
 
 
-                st.subheader("Reporte Completo de Marcaciones y Horas Trabajadas")
-                # Se muestra el DataFrame modificado en Streamlit, sin la columna booleana auxiliar
-                st.dataframe(df_resultado.drop(columns=['Llegada_Tarde_Bool'])) 
+                st.subheader("Resultados de las horas extra")
+                # Se muestra el DataFrame modificado en Streamlit, sin la columna auxiliar
+                st.dataframe(df_resultado.drop(columns=['Llegada_Tarde']))
 
                 # Prepara el DataFrame para descarga en formato Excel
                 buffer_excel = io.BytesIO()
                 with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                    
-                    # El DataFrame a exportar es el resultado SIN la columna booleana auxiliar.
-                    df_to_excel = df_resultado.drop(columns=['Llegada_Tarde_Bool']).copy() 
-                    df_to_excel.to_excel(writer, sheet_name='Reporte Completo', index=False)
+                    # Exporta el DataFrame sin la columna auxiliar al Excel
+                    df_to_excel = df_resultado.drop(columns=['Llegada_Tarde']).copy()
+                    df_to_excel.to_excel(writer, sheet_name='Reporte Horas Extra', index=False)
 
                     workbook = writer.book
-                    worksheet = writer.sheets['Reporte Completo']
+                    worksheet = writer.sheets['Reporte Horas Extra']
 
                     # Define a format for the orange background
                     orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
 
-                    # Obtiene el índice de la columna 'ENTRADA_REAL' en el DataFrame exportado
+                    # Get the column index for 'ENTRADA_REAL' in the exported DataFrame (df_to_excel)
                     try:
                         entrada_real_col_idx = df_to_excel.columns.get_loc('ENTRADA_REAL')
                     except KeyError:
                         entrada_real_col_idx = -1
 
                     if entrada_real_col_idx != -1:
-                        
-                        # USAMOS LA COLUMNA BOOLEANA GUARDADA PARA EL FORMATO
-                        llegada_tarde_serie = df_resultado['Llegada_Tarde_Bool']
-                        
-                        # Itera a través de las filas para aplicar el formato. Empieza en la fila 1 (después de encabezados)
-                        for row_num, is_late in enumerate(llegada_tarde_serie): 
-                            excel_row = row_num + 1 # Fila de Excel (1-indexada)
-                            entrada_valor = df_resultado.iloc[row_num]['ENTRADA_REAL']
-                            
+                        # Aplica formato condicional
+                        # Itera a través de las filas para aplicar el formato basado en la columna auxiliar
+                      
+                        for row_num, is_late in enumerate(df_resultado['Llegada_Tarde']): 
                             if is_late:
-                                # Escribe el valor con el formato naranja
-                                # Se asegura que el valor sea una cadena, que es el formato que sale de strftime
-                                worksheet.write(excel_row, entrada_real_col_idx, str(entrada_valor), orange_format)
+                                # Sumamos 1 a row_num porque ExcelWriter escribe encabezados en la primera fila (fila 0)
+                                # También usamos df_resultado para obtener el valor original de ENTRADA_REAL antes de cualquier posible modificación.
+                                worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'], orange_format)
                             else:
-                                # Escribe el valor sin formato
-                                worksheet.write(excel_row, entrada_real_col_idx, str(entrada_valor))
+                                worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'])
 
-                    buffer_excel.seek(0)
+                buffer_excel.seek(0)
 
-                    # Botón de descarga para el usuario
-                    st.download_button(
-                        label="Descargar Reporte Completo (Excel)",
-                        data=buffer_excel,
-                        file_name="Reporte_Marcaciones_y_Horas.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+                # Botón de descarga para el usuario
+                st.download_button(
+                    label="Descargar Reporte de Horas extra (Excel)",
+                    data=buffer_excel,
+                    file_name="Marcación_horas_extra.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
             else:
-                st.warning("No se pudieron asignar turnos o hubo inconsistencias en los registros que cumplieran los criterios de validación (por ejemplo, duración mínima de 4 horas o la hora de corte para turnos nocturnos).")
+                st.warning("No se pudieron asignar turnos o hubo inconsistencias en los registros que cumplieran los criterios de cálculo. Revisa tus datos y las reglas del sistema (por ejemplo, duración mínima de 5 horas o la hora de corte para turnos nocturnos).")
 
     except Exception as e:
         st.error(f"Error al procesar el archivo: {e}. Asegúrate de que la hoja se llama 'BaseDatos Modificada' y que tiene todas las columnas requeridas.")
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
+
+
 
 
 
