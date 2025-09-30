@@ -386,13 +386,3 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
-
-
-
-
-
-
-
-
-
-
