@@ -252,7 +252,7 @@ if archivo_excel is not None:
                 df_raw.dropna(subset=['FECHA_HORA'], inplace=True)
             except Exception as e:
                  st.error(f"Error al combinar FECHA y HORA. Revisa el formato de la columna HORA: {e}")
-                 return
+            return
 
             df_raw['PORTERIA_NORMALIZADA'] = df_raw['PORTERIA'].astype(str).str.strip().str.lower()
             df_raw['TIPO_MARCACION'] = df_raw['PuntoMarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
@@ -346,4 +346,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
+
 
