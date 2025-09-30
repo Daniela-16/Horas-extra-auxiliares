@@ -311,7 +311,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
     return pd.DataFrame(resultados) # Retorna los resultados como un DataFrame
 
 # --- Interfaz Streamlit ---
-st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
+st.set_page_config(page_title="Reporte de Marcaciones", layout="wide")
 st.title("📊 Reporte Completo de Marcaciones y Horas Trabajadas")
 st.write("Sube tu archivo de Excel para obtener el reporte de marcaciones válidas (incluyendo horas extra).")
 
@@ -327,25 +327,39 @@ if archivo_excel is not None:
         else:
             # Preprocesamiento inicial de columnas
 
-            df_raw['FECHA'] = pd.to_datetime(df_raw['FECHA'])
-            df_raw['HORA'] = df_raw['HORA'].astype(str)
+            df_raw['FECHA'] = pd.to_datetime(df_raw['FECHA'], errors='coerce')
+            
+            # --- AJUSTE CLAVE DE MANEJO DE HORA (Más robusto) ---
+            # 1. Limpiar y convertir la columna HORA a string
+            df_raw['HORA_STR'] = df_raw['HORA'].astype(str).str.strip()
 
-            # Función para asegurar que la hora tenga el formato HH:MM:SS
+            # 2. Función para estandarizar el formato de hora (añadir segundos si faltan)
             def standardize_time_format(time_str):
                 parts = time_str.split(':')
-                if len(parts) == 2: # El formato es HH:MM, se añaden ':00' para los segundos
+                if len(parts) == 2:
                     return f"{time_str}:00"
-                elif len(parts) == 3: # El formato ya es HH:MM:SS
-                    return time_str
-                else: # Manejar formatos inesperados, se retorna la cadena original
-                    return time_str # Se podría añadir un manejo de errores más robusto si es necesario
+                return time_str
 
-            df_raw['HORA'] = df_raw['HORA'].apply(standardize_time_format)
+            df_raw['HORA_STANDARDIZED'] = df_raw['HORA_STR'].apply(standardize_time_format)
+
+            # 3. Combinar FECHA y HORA de manera más segura usando Series y to_datetime
+            # Asegura que solo se intenten combinar valores válidos de FECHA
+            fecha_valida_mask = df_raw['FECHA'].notna()
             
-            df_raw['FECHA_HORA'] = pd.to_datetime(df_raw['FECHA'].dt.strftime('%Y-%m-%d') + ' ' + df_raw['HORA'])
+            df_raw.loc[fecha_valida_mask, 'FECHA_HORA'] = pd.to_datetime(
+                df_raw.loc[fecha_valida_mask, 'FECHA'].dt.strftime('%Y-%m-%d') + ' ' + df_raw.loc[fecha_valida_mask, 'HORA_STANDARDIZED'],
+                errors='coerce' # Si falla la conversión, será NaT
+            )
+            # Rellenar con NaT donde no se pudo combinar
+            df_raw['FECHA_HORA'] = df_raw['FECHA_HORA'].fillna(pd.NaT)
+            # ---------------------------------------------------
+
             df_raw['PORTERIA_NORMALIZADA'] = df_raw['PORTERIA'].astype(str).str.strip().str.lower()
             df_raw['TIPO_MARCACION'] = df_raw['PuntoMarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
             df_raw.rename(columns={'COD_TRABAJADOR': 'ID_TRABAJADOR'}, inplace=True)
+            
+            # Filtrar filas donde la fecha/hora es válida
+            df_raw = df_raw.dropna(subset=['FECHA_HORA'])
 
             # --- LÓGICA: Asignar Fecha Clave de Turno para el agrupamiento ---
 
@@ -432,10 +446,11 @@ if archivo_excel is not None:
                             
                             if is_late:
                                 # Escribe el valor con el formato naranja
-                                worksheet.write(excel_row, entrada_real_col_idx, entrada_valor, orange_format)
+                                # Se asegura que el valor sea una cadena, que es el formato que sale de strftime
+                                worksheet.write(excel_row, entrada_real_col_idx, str(entrada_valor), orange_format)
                             else:
                                 # Escribe el valor sin formato
-                                worksheet.write(excel_row, entrada_real_col_idx, entrada_valor)
+                                worksheet.write(excel_row, entrada_real_col_idx, str(entrada_valor))
 
                     buffer_excel.seek(0)
 
@@ -454,5 +469,6 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
+
 
 
