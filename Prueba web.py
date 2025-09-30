@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Calculadora de Horas Extra.
-Versión Final Corregida (Lógica Nocturna y Solución a SyntaxError con st.stop()).
+Versión Final: RESTAURADA la lógica de ENTRADA MÁS TEMPRANA y SALIDA MÁS TARDÍA 
+por cada FECHA_CLAVE_TURNO para calcular una única jornada larga.
 """
 
 import pandas as pd
@@ -32,7 +33,7 @@ TURNOS = {
 # --- 2. Configuración General ---
 
 LUGARES_TRABAJO_PRINCIPAL = [
-    "NOEL_MDE_OFIC_PRODUCCION_ENT", "NOEL_MDE_OFIC_PRODUCCION_SAL", "NOEL_MDE_MR_TUNEL_VIENTO_1_ENT",
+   "NOEL_MDE_OFIC_PRODUCCION_ENT", "NOEL_MDE_OFIC_PRODUCCION_SAL", "NOEL_MDE_MR_TUNEL_VIENTO_1_ENT",
     "NOEL_MDE_MR_MEZCLAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_SAL",
     "NOEL_MDE_MR_HORNO_6-8-9_ENT", "NOEL_MDE_MR_SERVICIOS_2_ENT", "NOEL_MDE_RECURSOS_HUMANOS_ENT",
     "NOEL_MDE_RECURSOS_HUMANOS_SAL", "NOEL_MDE_ESENCIAS_2_SAL", "NOEL_MDE_ESENCIAS_1_SAL",
@@ -49,19 +50,21 @@ LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_ING_MENORES_1_ENT", "NOEL_MDE_MR_HORNOS_SAL", "NOEL_MDE_MR_HORNO_6-8-9_SAL_2",
     "NOEL_MDE_PRINCIPAL_SAL", "NOEL_MDE_MR_ASPIRACION_ENT", "NOEL_MDE_MR_HORNO_2-12_SAL",
     "NOEL_MDE_MR_HORNOS_ENT", "NOEL_MDE_MR_HORNO_4-5_SAL", "NOEL_MDE_ING_MEN_ALERGENOS_SAL",
-    "NOEL_MDE_MR_WAFER_RCH_CREMAS_ENT", "NOEL_MDE_MR_WAFER_RCH_CREMAS_SAL","NOEL_MDE_MR_MEZCLAS_ENT", "NOEL_MDE_OFIC_PRODUCCION_SAL", "NOEL_MDE_OFIC_PRODUCCION_ENT"
+    "NOEL_MDE_MR_WAFER_RCH_CREMAS_ENT", "NOEL_MDE_MR_WAFER_RCH_CREMAS_SAL",
+    "NOEL_MDE_MR_MEZCLAS_ENT", "NOEL_MDE_OFIC_PRODUCCION_SAL", "NOEL_MDE_OFIC_PRODUCCION_ENT"
 ]
 
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 
 TOLERANCIA_INFERENCIA_MINUTOS = 50
 MAX_EXCESO_SALIDA_HRS = 3
-HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time() 
+HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 
 # --- 3. Obtener turno basado en fecha y hora ---
 
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date, tolerancia_minutos: int):
+    """ Busca el turno programado más cercano a la marcación de entrada usando la fecha clave. """
 
     dia_semana_clave = fecha_clave_turno_reporte.weekday()
 
@@ -100,10 +103,13 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     return mejor_turno if mejor_turno else (None, None, None, None)
 
-# --- 4. Calculo de horas ---
+# --- 4. Calculo de horas (RESTAURADA la lógica Min/Max) ---
 
 def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_minutos: int, tolerancia_llegada_tarde: int):
-
+    """
+    Agrupa por ID_TRABAJADOR y FECHA_CLAVE_TURNO para encontrar la ENTRADA MÁS TEMPRANA 
+    y la SALIDA MÁS TARDÍA, asumiendo una única jornada larga por día de turno.
+    """
     df_filtrado = df[(df['PORTERIA_NORMALIZADA'].isin(lugares_normalizados)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
     df_filtrado.sort_values(by=['ID_TRABAJADOR', 'FECHA_HORA'], inplace=True)
 
@@ -111,12 +117,14 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
     resultados = []
 
+    # Agrupa por ID de trabajador y por fecha clave turno
     for (id_trabajador, fecha_clave_turno), grupo in df_filtrado.groupby(['ID_TRABAJADOR', 'FECHA_CLAVE_TURNO']):
 
         nombre = grupo['NOMBRE'].iloc[0]
         entradas = grupo[grupo['TIPO_MARCACION'] == 'ent']
         salidas = grupo[grupo['TIPO_MARCACION'] == 'sal']
 
+        # Obtiene la primera entrada (mínima) y la última salida (máxima) de todo el grupo
         entrada_real = entradas['FECHA_HORA'].min() if not entradas.empty else pd.NaT
         salida_real = salidas['FECHA_HORA'].max() if not salidas.empty else pd.NaT
 
@@ -135,6 +143,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
                 estado_calculo = "Duración < 4h o Inconsistente"
             else:
                 # Regla 3: Intenta asignar un turno programado a la jornada
+                # Se usa la entrada_real (mínima) para inferir el turno.
                 turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
                 
                 if turno_nombre is None:
@@ -244,7 +253,6 @@ if archivo_excel is not None:
                 df_raw.dropna(subset=['FECHA_HORA'], inplace=True)
             except Exception as e:
                  st.error(f"Error al combinar FECHA y HORA. Revisa el formato de la columna HORA: {e}")
-                 # Usar st.stop() en lugar de return para evitar el SyntaxError
                  st.stop() 
 
             df_raw['PORTERIA_NORMALIZADA'] = df_raw['PORTERIA'].astype(str).str.strip().str.lower()
@@ -272,7 +280,7 @@ if archivo_excel is not None:
                 df_resultado['Llegada_Tarde'] = df_resultado['Llegada_Tarde_Mas_40_Min']
                 df_resultado.rename(columns={'Llegada_Tarde_Mas_40_Min': 'Estado_Llegada'}, inplace=True)
                 df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
-                df_resultado.sort_values(by=['NOMBRE', 'FECHA'], inplace=True)
+                df_resultado.sort_values(by=['NOMBRE', 'FECHA', 'ENTRADA_REAL'], inplace=True) # Ordena por fecha y hora de entrada
 
                 st.subheader("Resultados de las horas extra")
                 st.dataframe(df_resultado.drop(columns=['Llegada_Tarde']))
@@ -332,9 +340,3 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
-
-
-
-
-
-
