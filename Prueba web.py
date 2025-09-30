@@ -185,7 +185,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     # Retorna el mejor turno encontrado o None si no hubo coincidencias
     return mejor_turno if mejor_turno else (None, None, None, None)
 
-# --- 4. Calculo de horas (MODIFICADA para incluir todos los días válidos) ---
+# --- 4. Calculo de horas ---
 
 def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_minutos: int, tolerancia_llegada_tarde: int):
 
@@ -244,7 +244,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         # Regla 2:
         # Si la salida es antes o igual a la entrada, o la duración total es menor a 4 horas, se ignora.
 
-        # *** NOTA: Puedes ajustar este mínimo de 4 horas si la duración mínima de un turno es menor. ***
         if salida_real <= entrada_real or (salida_real - entrada_real) < timedelta(hours=4):
             continue
 
@@ -387,25 +386,26 @@ if archivo_excel is not None:
                     'Llegada_Tarde_Mas_40_Min': 'Llegada_Tarde_Flag' # Columna auxiliar para formato Excel
                 }, inplace=True)
                 
-                # 1. Prepara la columna para el formato de Excel
-                df_resultado['Llegada_Tarde'] = df_resultado['Llegada_Tarde_Flag']
-
-                # 2. Mapea los valores True/False a 'Tarde'/'A tiempo' en una nueva columna de estado
+                # 1. Prepara la columna booleana para el formato de Excel
+                df_resultado['Llegada_Tarde_Bool'] = df_resultado['Llegada_Tarde_Flag']
+                
+                # 2. Mapea los valores True/False a 'Tarde'/'A tiempo' en la columna 'Estado_Llegada'
                 df_resultado['Estado_Llegada'] = df_resultado['Llegada_Tarde_Flag'].map({True: 'Tarde', False: 'A tiempo'})
                 
-                # 3. Elimina la columna booleana original para la visualización
+                # 3. Elimina la columna booleana original para la visualización y descarga principal
                 df_resultado.drop(columns=['Llegada_Tarde_Flag'], inplace=True)
 
 
                 st.subheader("Reporte Completo de Marcaciones y Horas Trabajadas")
-                # Se muestra el DataFrame modificado en Streamlit, sin la columna auxiliar
-                st.dataframe(df_resultado.drop(columns=['Llegada_Tarde']))
+                # Se muestra el DataFrame modificado en Streamlit, sin la columna booleana auxiliar
+                st.dataframe(df_resultado.drop(columns=['Llegada_Tarde_Bool'])) 
 
                 # Prepara el DataFrame para descarga en formato Excel
                 buffer_excel = io.BytesIO()
                 with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
-                    # Exporta el DataFrame sin la columna auxiliar al Excel
-                    df_to_excel = df_resultado.drop(columns=['Llegada_Tarde']).copy()
+                    
+                    # El DataFrame a exportar es el resultado SIN la columna booleana auxiliar.
+                    df_to_excel = df_resultado.drop(columns=['Llegada_Tarde_Bool']).copy() 
                     df_to_excel.to_excel(writer, sheet_name='Reporte Completo', index=False)
 
                     workbook = writer.book
@@ -414,21 +414,28 @@ if archivo_excel is not None:
                     # Define a format for the orange background
                     orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
 
-                    # Get the column index for 'ENTRADA_REAL' in the exported DataFrame (df_to_excel)
+                    # Obtiene el índice de la columna 'ENTRADA_REAL' en el DataFrame exportado
                     try:
                         entrada_real_col_idx = df_to_excel.columns.get_loc('ENTRADA_REAL')
                     except KeyError:
                         entrada_real_col_idx = -1
 
                     if entrada_real_col_idx != -1:
-                        # Itera a través de las filas para aplicar el formato basado en la columna auxiliar
                         
-                        for row_num, is_late in enumerate(df_resultado['Llegada_Tarde']): 
+                        # USAMOS LA COLUMNA BOOLEANA GUARDADA PARA EL FORMATO
+                        llegada_tarde_serie = df_resultado['Llegada_Tarde_Bool']
+                        
+                        # Itera a través de las filas para aplicar el formato. Empieza en la fila 1 (después de encabezados)
+                        for row_num, is_late in enumerate(llegada_tarde_serie): 
+                            excel_row = row_num + 1 # Fila de Excel (1-indexada)
+                            entrada_valor = df_resultado.iloc[row_num]['ENTRADA_REAL']
+                            
                             if is_late:
-                                # Sumamos 1 a row_num porque ExcelWriter escribe encabezados en la primera fila (fila 0)
-                                worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'], orange_format)
+                                # Escribe el valor con el formato naranja
+                                worksheet.write(excel_row, entrada_real_col_idx, entrada_valor, orange_format)
                             else:
-                                worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'])
+                                # Escribe el valor sin formato
+                                worksheet.write(excel_row, entrada_real_col_idx, entrada_valor)
 
                     buffer_excel.seek(0)
 
