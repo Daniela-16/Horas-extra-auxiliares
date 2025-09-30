@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Jul 21 09:20:21 2025
-
-@author: NCGNpracpim
-"""
-
 import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
@@ -33,7 +26,7 @@ TURNOS = {
 # --- 2. Configuración General ---
 
 LUGARES_TRABAJO_PRINCIPAL = [
-    "NOEL_MDE_OFIC_PRODUCCION_ENT",
+   "NOEL_MDE_OFIC_PRODUCCION_ENT",
     "NOEL_MDE_OFIC_PRODUCCION_SAL",
     "NOEL_MDE_MR_TUNEL_VIENTO_1_ENT",
     "NOEL_MDE_MR_MEZCLAS_ENT",
@@ -83,18 +76,14 @@ LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_MR_HORNO_2-12_SAL",
     "NOEL_MDE_MR_HORNOS_ENT",
     "NOEL_MDE_MR_HORNO_4-5_SAL",
-    "NOEL_MDE_ING_MEN_ALERGENOS_SAL",
-    "NOEL_MDE_MR_WAFER_RCH_CREMAS_ENT",
-    "NOEL_MDE_MR_WAFER_RCH_CREMAS_SAL",
-    
+    "NOEL_MDE_ING_MEN_ALERGENOS_SAL"
 ]
 
 # Normaliza los nombres de los lugares de trabajo (minúsculas, sin espacios extra).
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 
 # Tolerancia en minutos para inferir si una marcación está cerca del inicio/fin de un turno.
-# Aumentado a 120 minutos (2 horas) para capturar más casos atípicos/inconsistentes.
-TOLERANCIA_INFERENCIA_MINUTOS = 120 
+TOLERANCIA_INFERENCIA_MINUTOS = 50
 
 # Límite máximo de horas que una salida puede exceder el fin de turno programado.
 MAX_EXCESO_SALIDA_HRS = 3
@@ -114,7 +103,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     Parámetros:
     - fecha_hora_evento (datetime): La fecha y hora de la marcación (usualmente la entrada).
     - fecha_clave_turno_reporte (datetime.date): La fecha lógica del turno (FECHA_CLAVE_TURNO)
-                                                 usada para determinar el tipo de día (LV, SAB, DOM).
+                                                usada para determinar el tipo de día (LV, SAB, DOM).
     - tolerancia_minutos (int): Minutos de flexibilidad alrededor del inicio/fin del turno.
 
     Retorna:
@@ -198,7 +187,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
     - tolerancia_llegada_tarde (int): Minutos de gracia para considerar una llegada tarde.
 
     Retorna:
-    - pd.DataFrame: Con los resultados de horas trabajadas y extra (ahora incluye los días con 0 horas extra).
+    - pd.DataFrame: Con los resultados de horas trabajadas y extra.
     """
 
     # Filtra las marcaciones por los lugares principales y tipos 'ent'/'sal'
@@ -220,9 +209,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
     for (id_trabajador, fecha_clave_turno), grupo in df.groupby(['ID_TRABAJADOR', 'FECHA_CLAVE_TURNO']):
 
-        nombre = grupo['NOMBRE'].iloc[0] 
-        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'] 
-        salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] 
+        nombre = grupo['NOMBRE'].iloc[0] #sera el mismo en todo el grupo debido a que se ordenó por nombre
+        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'] # Marcaciones de entrada del grupo
+        salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] # Marcaciones de salida del grupo
 
         # Regla 1:
         # Si no hay entradas o salidas, se ignora el grupo
@@ -238,25 +227,20 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         porteria_salida = salidas[salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0] if not salidas.empty else None
 
         # Regla 2:
-        # Si la salida es antes o igual a la entrada, se ignora. 
-        if salida_real <= entrada_real:
+        # Si la salida es antes o igual a la entrada, o la duración total es menor a 4 horas, se ignora.
+
+        if salida_real <= entrada_real or (salida_real - entrada_real) < timedelta(hours=4):
             continue
 
         # Regla 3:
-        # Intenta asignar un turno programado a la jornada
-        
-        # 3.1: Intento de asignación con la tolerancia por defecto (120 minutos)
+        #Intenta asignar un turno programado a la jornada
+
         turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
-        
         if turno_nombre is None:
-            # 3.2: Intento de rescate con una tolerancia mayor (180 minutos) para capturar días inconsistentes
-            turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, 180) 
-            
-            if turno_nombre is None:
-                 continue # Si no se puede asignar un turno, se ignora el grupo
+            continue # Si no se puede asignar un turno, se ignora el grupo
 
         # Regla 4:
-        # Valida que la salida real no exceda un límite razonable del fin de turno programado
+        #Valida que la salida real no exceda un límite razonable del fin de turno programado
 
         if salida_real > fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
             continue
@@ -284,7 +268,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
 
 
-        # Añade los resultados a la lista (ESTO INCLUYE DÍAS CON HORAS_EXTRA = 0)
+        # Añade los resultados a la lista
         resultados.append({
             'NOMBRE': nombre,
             'ID_TRABAJADOR': id_trabajador,
@@ -300,8 +284,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
             'PORTERIA_SALIDA': porteria_salida,
             'Horas_Trabajadas': horas_trabajadas, # Ahora muestra las horas calculadas desde la hora ajustada
             'Horas_Extra': horas_extra,
-            'Horas': int(horas_extra),
-            'Minutos': round((horas_extra - int(horas_extra)) * 60),
+            'Horas_Extra_Enteras': int(horas_extra),
+            'Minutos_Extra': round((horas_extra - int(horas_extra)) * 60),
             'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag # Nueva columna para indicar llegada tarde
         })
 
@@ -309,8 +293,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
 # --- Interfaz Streamlit ---
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
-st.title("📊 Calculadora de Horas Extra y Jornadas Completas")
-st.write("Sube tu archivo de Excel para calcular las horas trabajadas, incluyendo las horas extra, para todos los días con turno asignado.")
+st.title("📊 Calculadora de Horas Extra")
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal.")
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -373,7 +357,6 @@ if archivo_excel is not None:
             st.success("Archivo cargado y preprocesado con éxito.")
 
             # Llama a la función principal de cálculo con el DataFrame modificado
-            # Se pasa la TOLERANCIA_INFERENCIA_MINUTOS (120) como argumento
             df_resultado = calcular_turnos(df_raw.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS, TOLERANCIA_LLEGADA_TARDE_MINUTOS)
 
             if not df_resultado.empty:
@@ -387,7 +370,7 @@ if archivo_excel is not None:
                 df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
 
 
-                st.subheader("Resultados de las Horas Trabajadas y Horas Extra")
+                st.subheader("Resultados de las horas extra")
                 # Se muestra el DataFrame modificado en Streamlit, sin la columna auxiliar
                 st.dataframe(df_resultado.drop(columns=['Llegada_Tarde']))
 
@@ -396,10 +379,10 @@ if archivo_excel is not None:
                 with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
                     # Exporta el DataFrame sin la columna auxiliar al Excel
                     df_to_excel = df_resultado.drop(columns=['Llegada_Tarde']).copy()
-                    df_to_excel.to_excel(writer, sheet_name='Reporte Horas', index=False)
+                    df_to_excel.to_excel(writer, sheet_name='Reporte Horas Extra', index=False)
 
                     workbook = writer.book
-                    worksheet = writer.sheets['Reporte Horas']
+                    worksheet = writer.sheets['Reporte Horas Extra']
 
                     # Define a format for the orange background
                     orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
@@ -412,10 +395,12 @@ if archivo_excel is not None:
 
                     if entrada_real_col_idx != -1:
                         # Aplica formato condicional
-                        
+                        # Itera a través de las filas para aplicar el formato basado en la columna auxiliar
+                      
                         for row_num, is_late in enumerate(df_resultado['Llegada_Tarde']): 
                             if is_late:
-                                # Se aplica el formato naranja si hubo llegada tarde
+                                # Sumamos 1 a row_num porque ExcelWriter escribe encabezados en la primera fila (fila 0)
+                                # También usamos df_resultado para obtener el valor original de ENTRADA_REAL antes de cualquier posible modificación.
                                 worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'], orange_format)
                             else:
                                 worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'])
@@ -424,13 +409,13 @@ if archivo_excel is not None:
 
                 # Botón de descarga para el usuario
                 st.download_button(
-                    label="Descargar Reporte de Horas (Excel)",
+                    label="Descargar Reporte de Horas extra (Excel)",
                     data=buffer_excel,
-                    file_name="Marcación_horas_trabajadas.xlsx",
+                    file_name="reporte_horas_extra.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             else:
-                st.warning("No se pudieron asignar turnos o hubo inconsistencias en los registros que cumplieran los criterios de cálculo. Revisa tus datos y las reglas del sistema.")
+                st.warning("No se pudieron asignar turnos o hubo inconsistencias en los registros que cumplieran los criterios de cálculo. Revisa tus datos y las reglas del sistema (por ejemplo, duración mínima de 5 horas o la hora de corte para turnos nocturnos).")
 
     except Exception as e:
         st.error(f"Error al procesar el archivo: {e}. Asegúrate de que la hoja se llama 'BaseDatos Modificada' y que tiene todas las columnas requeridas.")
