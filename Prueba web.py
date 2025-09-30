@@ -93,7 +93,7 @@ LUGARES_TRABAJO_PRINCIPAL = [
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 
 # Tolerancia en minutos para inferir si una marcación está cerca del inicio/fin de un turno.
-# AJUSTADO A 120 MINUTOS (2 HORAS) PARA CAPTURAR MÁS CASOS ATÍPICOS/INCONSISTENTES
+# Aumentado a 120 minutos (2 horas) para capturar más casos atípicos/inconsistentes.
 TOLERANCIA_INFERENCIA_MINUTOS = 120 
 
 # Límite máximo de horas que una salida puede exceder el fin de turno programado.
@@ -373,6 +373,7 @@ if archivo_excel is not None:
             st.success("Archivo cargado y preprocesado con éxito.")
 
             # Llama a la función principal de cálculo con el DataFrame modificado
+            # Se pasa la TOLERANCIA_INFERENCIA_MINUTOS (120) como argumento
             df_resultado = calcular_turnos(df_raw.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS, TOLERANCIA_INFERENCIA_MINUTOS, TOLERANCIA_LLEGADA_TARDE_MINUTOS)
 
             if not df_resultado.empty:
@@ -407,7 +408,7 @@ if archivo_excel is not None:
                     try:
                         entrada_real_col_idx = df_to_excel.columns.get_loc('ENTRADA_REAL')
                     except KeyError:
-                        entrada_real_col_col_idx = -1
+                        entrada_real_col_idx = -1
 
                     if entrada_real_col_idx != -1:
                         # Aplica formato condicional
@@ -436,6 +437,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
+
 
 
 
