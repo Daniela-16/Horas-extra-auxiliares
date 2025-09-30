@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Calculadora de Horas Extra.
-Versión Final: RESTAURADA la lógica de ENTRADA MÁS TEMPRANA y SALIDA MÁS TARDÍA 
-por cada FECHA_CLAVE_TURNO para calcular una única jornada larga.
+Versión Final: Implementa Min/Max y asegura la ASIGNACIÓN DE TURNO para jornadas cortas.
 """
 
 import pandas as pd
@@ -103,12 +102,12 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     return mejor_turno if mejor_turno else (None, None, None, None)
 
-# --- 4. Calculo de horas (RESTAURADA la lógica Min/Max) ---
+# --- 4. Calculo de horas (Modificado para aceptar jornadas cortas y asignar turno) ---
 
 def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_minutos: int, tolerancia_llegada_tarde: int):
     """
-    Agrupa por ID_TRABAJADOR y FECHA_CLAVE_TURNO para encontrar la ENTRADA MÁS TEMPRANA 
-    y la SALIDA MÁS TARDÍA, asumiendo una única jornada larga por día de turno.
+    Agrupa por FECHA_CLAVE_TURNO. Toma la ENTRADA MÁS TEMPRANA y la SALIDA MÁS TARDÍA 
+    VÁLIDA (filtrada por el límite del turno).
     """
     df_filtrado = df[(df['PORTERIA_NORMALIZADA'].isin(lugares_normalizados)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
     df_filtrado.sort_values(by=['ID_TRABAJADOR', 'FECHA_HORA'], inplace=True)
@@ -124,42 +123,60 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         entradas = grupo[grupo['TIPO_MARCACION'] == 'ent']
         salidas = grupo[grupo['TIPO_MARCACION'] == 'sal']
 
-        # Obtiene la primera entrada (mínima) y la última salida (máxima) de todo el grupo
+        # Obtiene la primera entrada (mínima)
         entrada_real = entradas['FECHA_HORA'].min() if not entradas.empty else pd.NaT
-        salida_real = salidas['FECHA_HORA'].max() if not salidas.empty else pd.NaT
-
-        porteria_entrada = entradas[entradas['FECHA_HORA'] == entrada_real]['PORTERIA'].iloc[0] if not entradas.empty and pd.notna(entrada_real) else 'Sin Entrada'
-        porteria_salida = salidas[salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0] if not salidas.empty and pd.notna(salida_real) else 'Sin Salida'
-
+        
+        # Inicializa variables
+        salida_real = pd.NaT
+        porteria_entrada = 'Sin Entrada'
+        porteria_salida = 'Sin Salida'
         turno_nombre, info_turno, inicio_turno, fin_turno = (None, None, None, None)
         horas_trabajadas = 0.0
         horas_extra = 0.0
         llegada_tarde_flag = False
-        estado_calculo = "No Calculado"
+        estado_calculo = "Sin Marcaciones Válidas"
 
-        if pd.notna(entrada_real) and pd.notna(salida_real):
-            # Regla 2: Mínima duración para el cálculo (4 horas)
-            if salida_real <= entrada_real or (salida_real - entrada_real) < timedelta(hours=4):
-                estado_calculo = "Duración < 4h o Inconsistente"
+        if pd.notna(entrada_real):
+            # --- 1. INTENTA ASIGNAR EL TURNO (OBLIGATORIO) ---
+            porteria_entrada = entradas[entradas['FECHA_HORA'] == entrada_real]['PORTERIA'].iloc[0]
+            turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
+            
+            if turno_nombre is None:
+                estado_calculo = "Turno No Asignado (Fuera de rango)"
+            elif salidas.empty:
+                estado_calculo = "Falta Salida"
             else:
-                # Regla 3: Intenta asignar un turno programado a la jornada
-                # Se usa la entrada_real (mínima) para inferir el turno.
-                turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
+                # --- 2. FILTRO DE SALIDA VÁLIDA ---
                 
-                if turno_nombre is None:
-                    estado_calculo = "Turno No Asignado (Fuera de rango)"
+                # Calcula el límite máximo de salida aceptable para el turno inferido (Fin + Exceso)
+                max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
                 
+                # Filtra las salidas que estén DENTRO del límite aceptable 
+                valid_salidas = salidas[salidas['FECHA_HORA'] <= max_salida_aceptable]
+                
+                if valid_salidas.empty:
+                    # Si la única salida es demasiado tarde (ej. salida nocturna reclamada por turno diurno)
+                    estado_calculo = "Salida Excede Límite o Sin Salida Válida"
                 else:
-                    # Regla 4: Valida que la salida real no exceda un límite razonable
-                    if salida_real > fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
-                        estado_calculo = "Salida Excede Límite"
+                    # Reasigna la SALIDA REAL a la última salida VÁLIDA del grupo
+                    salida_real = valid_salidas['FECHA_HORA'].max()
+                    porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0]
+                
+                    # --- 3. REGLAS DE CÁLCULO (Solo si la salida es válida y cronológica) ---
+
+                    if salida_real <= entrada_real:
+                        estado_calculo = "Salida antes o igual a Entrada"
                     else:
-                        # --- Lógica de cálculo de horas ---
+                        duracion_total = salida_real - entrada_real
+                        
+                        # --- CÁLCULO DE HORAS (Siempre se calcula si hay E/S válidas) ---
                         inicio_efectivo_calculo = inicio_turno
+                        llegada_tarde_flag = False
                         
                         if entrada_real > inicio_turno:
                             diferencia_entrada = entrada_real - inicio_turno
                             if diferencia_entrada > timedelta(minutes=tolerancia_llegada_tarde):
+                                # Si llega tarde más la tolerancia, el cálculo inicia en la entrada real
                                 inicio_efectivo_calculo = entrada_real 
                                 llegada_tarde_flag = True
                         
@@ -167,15 +184,18 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
                         horas_trabajadas = round(duracion_efectiva_calculo.total_seconds() / 3600, 2)
                         
                         horas_turno = info_turno["duracion_hrs"]
-                        horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
-                        estado_calculo = "Calculado"
+                        
+                        # El cálculo de horas extra se ajusta según la duración mínima
+                        if duracion_total < timedelta(hours=4):
+                            estado_calculo = "Jornada Corta (< 4h)"
+                            horas_extra = 0.0
+                            # Horas trabajadas se mantienen
+                        else:
+                            horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
+                            estado_calculo = "Calculado"
 
-        elif pd.notna(entrada_real) and pd.isna(salida_real):
-             estado_calculo = "Falta Salida"
-        elif pd.isna(entrada_real) and pd.notna(salida_real):
+        elif pd.isna(entrada_real) and not salidas.empty:
              estado_calculo = "Falta Entrada"
-        else:
-             estado_calculo = "Sin Marcaciones Válidas"
              
         # --- Añade los resultados a la lista (Se reporta todo) ---
         ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
@@ -226,7 +246,8 @@ if archivo_excel is not None:
             # Preprocesamiento inicial de columnas
             df_raw['FECHA'] = pd.to_datetime(df_raw['FECHA'], errors='coerce') 
             df_raw.dropna(subset=['FECHA'], inplace=True)
-            df_raw['HORA'] = df_raw['HORA'].astype(str)
+            df_raw['HORA'] = pd.to_datetime(df_raw['HORA'], errors='coerce').dt.time.astype(str) # Asegura formato de hora 
+            # Si se encuentra un error en la conversión de hora, se detiene
 
             # --- Función para estandarizar el formato de la hora ---
             def standardize_time_format(time_val):
@@ -263,11 +284,18 @@ if archivo_excel is not None:
             def asignar_fecha_clave_turno_corregida(row):
                 fecha_original = row['FECHA_HORA'].date()
                 hora_marcacion = row['FECHA_HORA'].time()
+                tipo_marcacion = row['TIPO_MARCACION']
                 
-                if hora_marcacion < HORA_CORTE_NOCTURNO:
-                    return fecha_original - timedelta(days=1)
-                else:
+                # Las ENTRADAS siempre anclan la jornada al día en que ocurrieron.
+                if tipo_marcacion == 'ent':
                     return fecha_original
+                
+                # Las SALIDAS antes del corte (8 AM) se asocian al turno del día anterior.
+                if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
+                    return fecha_original - timedelta(days=1)
+                
+                # Otras salidas (después de 8 AM) pertenecen al día en que fueron marcadas.
+                return fecha_original
 
             df_raw['FECHA_CLAVE_TURNO'] = df_raw.apply(asignar_fecha_clave_turno_corregida, axis=1)
 
@@ -280,7 +308,7 @@ if archivo_excel is not None:
                 df_resultado['Llegada_Tarde'] = df_resultado['Llegada_Tarde_Mas_40_Min']
                 df_resultado.rename(columns={'Llegada_Tarde_Mas_40_Min': 'Estado_Llegada'}, inplace=True)
                 df_resultado['Estado_Llegada'] = df_resultado['Estado_Llegada'].map({True: 'Tarde', False: 'A tiempo'})
-                df_resultado.sort_values(by=['NOMBRE', 'FECHA', 'ENTRADA_REAL'], inplace=True) # Ordena por fecha y hora de entrada
+                df_resultado.sort_values(by=['NOMBRE', 'FECHA', 'ENTRADA_REAL'], inplace=True) 
 
                 st.subheader("Resultados de las horas extra")
                 st.dataframe(df_resultado.drop(columns=['Llegada_Tarde']))
