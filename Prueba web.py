@@ -83,7 +83,10 @@ LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_MR_HORNO_2-12_SAL",
     "NOEL_MDE_MR_HORNOS_ENT",
     "NOEL_MDE_MR_HORNO_4-5_SAL",
-    "NOEL_MDE_ING_MEN_ALERGENOS_SAL"
+    "NOEL_MDE_ING_MEN_ALERGENOS_SAL",
+    "NOEL_MDE_MR_WAFER_RCH_CREMAS_ENT",
+    "NOEL_MDE_MR_WAFER_RCH_CREMAS_SAL",
+    
 ]
 
 # Normaliza los nombres de los lugares de trabajo (minúsculas, sin espacios extra).
@@ -429,4 +432,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️")
+
 
