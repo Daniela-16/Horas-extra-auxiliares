@@ -93,7 +93,8 @@ LUGARES_TRABAJO_PRINCIPAL = [
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 
 # Tolerancia en minutos para inferir si una marcación está cerca del inicio/fin de un turno.
-TOLERANCIA_INFERENCIA_MINUTOS = 50
+# AJUSTADO A 120 MINUTOS (2 HORAS) PARA CAPTURAR MÁS CASOS ATÍPICOS/INCONSISTENTES
+TOLERANCIA_INFERENCIA_MINUTOS = 120 
 
 # Límite máximo de horas que una salida puede exceder el fin de turno programado.
 MAX_EXCESO_SALIDA_HRS = 3
@@ -219,9 +220,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
     for (id_trabajador, fecha_clave_turno), grupo in df.groupby(['ID_TRABAJADOR', 'FECHA_CLAVE_TURNO']):
 
-        nombre = grupo['NOMBRE'].iloc[0] #sera el mismo en todo el grupo debido a que se ordenó por nombre
-        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'] # Marcaciones de entrada del grupo
-        salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] # Marcaciones de salida del grupo
+        nombre = grupo['NOMBRE'].iloc[0] 
+        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'] 
+        salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] 
 
         # Regla 1:
         # Si no hay entradas o salidas, se ignora el grupo
@@ -237,19 +238,25 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         porteria_salida = salidas[salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0] if not salidas.empty else None
 
         # Regla 2:
-        # Si la salida es antes o igual a la entrada, se ignora. (Eliminada la restricción de 4 horas mínimas)
+        # Si la salida es antes o igual a la entrada, se ignora. 
         if salida_real <= entrada_real:
             continue
 
         # Regla 3:
-        #Intenta asignar un turno programado a la jornada
-
+        # Intenta asignar un turno programado a la jornada
+        
+        # 3.1: Intento de asignación con la tolerancia por defecto (120 minutos)
         turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
+        
         if turno_nombre is None:
-            continue # Si no se puede asignar un turno, se ignora el grupo
+            # 3.2: Intento de rescate con una tolerancia mayor (180 minutos) para capturar días inconsistentes
+            turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, 180) 
+            
+            if turno_nombre is None:
+                 continue # Si no se puede asignar un turno, se ignora el grupo
 
         # Regla 4:
-        #Valida que la salida real no exceda un límite razonable del fin de turno programado
+        # Valida que la salida real no exceda un límite razonable del fin de turno programado
 
         if salida_real > fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS):
             continue
@@ -400,16 +407,14 @@ if archivo_excel is not None:
                     try:
                         entrada_real_col_idx = df_to_excel.columns.get_loc('ENTRADA_REAL')
                     except KeyError:
-                        entrada_real_col_idx = -1
+                        entrada_real_col_col_idx = -1
 
                     if entrada_real_col_idx != -1:
                         # Aplica formato condicional
-                        # Itera a través de las filas para aplicar el formato basado en la columna auxiliar
-                    
+                        
                         for row_num, is_late in enumerate(df_resultado['Llegada_Tarde']): 
                             if is_late:
-                                # Sumamos 1 a row_num porque ExcelWriter escribe encabezados en la primera fila (fila 0)
-                                # También usamos df_resultado para obtener el valor original de ENTRADA_REAL antes de cualquier posible modificación.
+                                # Se aplica el formato naranja si hubo llegada tarde
                                 worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'], orange_format)
                             else:
                                 worksheet.write(row_num + 1, entrada_real_col_idx, df_resultado.iloc[row_num]['ENTRADA_REAL'])
