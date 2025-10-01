@@ -285,7 +285,10 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
         elif pd.isna(entrada_real) and not salidas.empty:
             # Caso de "Primer día" donde solo hay una salida de madrugada (FECHA_CLAVE_TURNO = Día anterior).
+            # Esta es la jornada que el usuario quiere omitir, ya que no hay datos de entrada previos.
             estado_calculo = "Falta Entrada (Salida marcada en el inicio del periodo)"
+            # *** CÓDIGO AÑADIDO: Omitir el reporte de este registro de borde ***
+            continue # Saltamos la creación del registro para limpiar el reporte inicial
             
         # --- Añade los resultados a la lista (Se reporta todo) ---
         ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
@@ -479,6 +482,8 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
+
 
 
 
