@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# coding: utf-8 -*-
 """
 Calculadora de Horas Extra.
 Versión Mejorada: Implementa Búsqueda Robusta de Turno Nocturno y Manejo de Bordes.
@@ -35,6 +35,7 @@ TURNOS = {
 # --- 2. Configuración General ---
 
 # Lista de porterías/lugares considerados como válidos para Entrada/Salida de jornada
+# SE MANTIENE LA LISTA ORIGINAL SEGÚN REQUERIMIENTO DEL USUARIO
 LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_OFIC_PRODUCCION_ENT", "NOEL_MDE_OFIC_PRODUCCION_SAL", "NOEL_MDE_MR_TUNEL_VIENTO_1_ENT",
     "NOEL_MDE_MR_MEZCLAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_SAL",
@@ -128,22 +129,26 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # Rango de tolerancia para la entrada.
-        rango_inicio = inicio_posible_turno - timedelta(minutes=tolerancia_minutos)
+        # --- CAMBIO CLAVE: RANGO DE ENTRADA MÁS AMPLIO ---
+        # Límite inferior general: 4 horas antes del inicio programado.
+        # Esto permite que entradas tempranas (como 9:27am para un turno 11:40am) entren en competencia.
+        min_entrada_aceptable = inicio_posible_turno - timedelta(hours=4) 
         
         # Límite superior para la salida aceptable
         max_salida_aceptable = fin_posible_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
 
-        # Validar si el evento (la entrada) cae en el rango ampliado del turno (desde antes del inicio hasta después del fin).
-        if fecha_hora_evento >= rango_inicio and fecha_hora_evento <= max_salida_aceptable:
+        # Validar si el evento (la entrada) cae en el rango amplio del turno
+        if fecha_hora_evento >= min_entrada_aceptable and fecha_hora_evento <= max_salida_aceptable:
 
-            # La diferencia se calcula entre la entrada real y el inicio PROGRAMADO del turno
+            # La diferencia (el ajuste) se calcula entre la entrada real y el inicio PROGRAMADO del turno.
+            # La entrada con la menor diferencia (la más cercana al inicio programado) será elegida.
             diferencia = abs(fecha_hora_evento - inicio_posible_turno)
 
             if mejor_turno_data is None or diferencia < menor_diferencia:
                 mejor_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
                 menor_diferencia = diferencia
-
+        # --- FIN CAMBIO CLAVE ---
+        
     return mejor_turno_data if mejor_turno_data else (None, None, None, None, None)
 
 # --- 4. Calculo de horas (Selección de Min/Max y Priorización de Turno) ---
@@ -216,8 +221,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
                 max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
                 
                 # Filtra las salidas que ocurrieron DESPUÉS de la ENTRADA REAL seleccionada y DENTRO del límite aceptable
-                # NOTA: La salida puede tener una FECHA_CLAVE_TURNO diferente a la final reasignada,
-                # pero siempre debe ser posterior a la entrada real y dentro del límite.
                 valid_salidas = df_filtrado[
                     (df_filtrado['ID_TRABAJADOR'] == id_trabajador) &
                     (df_filtrado['TIPO_MARCACION'] == 'sal') &
@@ -227,7 +230,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
                 
                 if valid_salidas.empty:
                     # SI NO HAY SALIDA VÁLIDA: ASUMIR SALIDA A LA HORA PROGRAMADA DEL FIN DE TURNO
-                    # Esto maneja perfectamente el caso del último día del reporte.
                     salida_real = fin_turno
                     porteria_salida = 'ASUMIDA (FIN TURNO)'
                     estado_calculo = "ASUMIDO (Falta Salida/Salida Inválida)"
@@ -285,10 +287,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
         elif pd.isna(entrada_real) and not salidas.empty:
             # Caso de "Primer día" donde solo hay una salida de madrugada (FECHA_CLAVE_TURNO = Día anterior).
-            # Esta es la jornada que el usuario quiere omitir, ya que no hay datos de entrada previos.
             estado_calculo = "Falta Entrada (Salida marcada en el inicio del periodo)"
-            # *** CÓDIGO AÑADIDO: Omitir el reporte de este registro de borde ***
-            continue # Saltamos la creación del registro para limpiar el reporte inicial
+            # Omitir el reporte de este registro de borde
+            continue 
             
         # --- Añade los resultados a la lista (Se reporta todo) ---
         ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
@@ -370,7 +371,7 @@ if archivo_excel is not None:
                 df_raw.dropna(subset=['FECHA_HORA'], inplace=True)
             except Exception as e:
                 st.error(f"Error al combinar FECHA y HORA. Revisa el formato de la columna HORA: {e}")
-                st.stop() 
+                st.stop()  
 
             df_raw['PORTERIA_NORMALIZADA'] = df_raw['PORTERIA'].astype(str).str.strip().str.lower()
             # Mapeo de PuntoMarcacion a 'ent' o 'sal'
@@ -378,8 +379,6 @@ if archivo_excel is not None:
             df_raw.rename(columns={'COD_TRABAJADOR': 'ID_TRABAJADOR'}, inplace=True)
 
             # --- Función para asignar Fecha Clave de Turno (Lógica Nocturna) ---
-            # NOTA: Esta lógica se usa para la agrupación INICIAL. Luego, en calcular_turnos,
-            # se puede reasignar la FECHA_CLAVE_TURNO al encontrar el turno más cercano del día anterior.
             def asignar_fecha_clave_turno_corregida(row):
                 fecha_original = row['FECHA_HORA'].date()
                 hora_marcacion = row['FECHA_HORA'].time()
@@ -390,7 +389,6 @@ if archivo_excel is not None:
                     return fecha_original
                 
                 # Regla nocturna: Las SALIDAS antes del corte se asocian al turno del día anterior.
-                # Esto es crucial para agrupar Entrada (Día 1 Noche) y Salida (Día 2 Madrugada).
                 if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
                     return fecha_original - timedelta(days=1)
                 
