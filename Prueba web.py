@@ -80,7 +80,7 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 # Tolerancia para considerar la llegada como 'tarde' para el cálculo de horas.
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 # Tolerancia para considerar la llegada como 'temprana'
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 30
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 120
 
 # --- 3. Obtener turno basado en fecha y hora (REVISIÓN DE DÍA ANTERIOR AÑADIDA) ---
 
@@ -487,4 +487,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
