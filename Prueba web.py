@@ -410,4 +410,103 @@ if archivo_excel is not None:
                 
                 # Regla nocturna: Las SALIDAS antes del corte se asocian al turno del día anterior.
                 if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
-                    return fecha_original - timedelta
+                    return fecha_original - timedelta(days=1) # CORREGIDO: timedelta debe llevar argumentos
+                
+                # Otras salidas (después de 8 AM) pertenecen al día en que fueron marcadas.
+                return fecha_original
+
+            df_raw['FECHA_CLAVE_TURNO'] = df_raw.apply(asignar_fecha_clave_turno_corregida, axis=1)
+
+            st.success(f"✅ Archivo cargado y preprocesado con éxito. Se encontraron {len(df_raw['FECHA_CLAVE_TURNO'].unique())} días de jornada para procesar.")
+
+            # --- Ejecutar el Cálculo con Prioridad Puestos/Porterías ---
+            df_resultado = calcular_turnos(
+                df_raw.copy(), 
+                LUGARES_PUESTOS_NORMALIZADOS, 
+                LUGARES_PORTERIAS_NORMALIZADAS, 
+                TOLERANCIA_INFERENCIA_MINUTOS, 
+                TOLERANCIA_LLEGADA_TARDE_MINUTOS
+            )
+
+            if not df_resultado.empty:
+                # Post-procesamiento para el reporte
+                df_resultado['Estado_Llegada'] = df_resultado['Llegada_Tarde_Mas_40_Min'].map({True: 'Tarde', False: 'A tiempo'})
+                df_resultado.sort_values(by=['NOMBRE', 'FECHA', 'ENTRADA_REAL'], inplace=True) 
+                
+                # Columnas a mostrar en la tabla final
+                columnas_reporte = [
+                    'NOMBRE', 'ID_TRABAJADOR', 'FECHA', 'Dia_Semana', 'TURNO',
+                    'Inicio_Turno_Programado', 'Fin_Turno_Programado', 'Duracion_Turno_Programado_Hrs',
+                    'ENTRADA_REAL', 'PORTERIA_ENTRADA', 'SALIDA_REAL', 'PORTERIA_SALIDA',
+                    'Horas_Trabajadas_Netas', 'Horas_Extra', 'Horas', 'Minutos', 
+                    'Estado_Llegada', 'Estado_Calculo'
+                ]
+
+                st.subheader("Resultados de las Horas Extra")
+                st.dataframe(df_resultado[columnas_reporte], use_container_width=True)
+
+                # --- Lógica de descarga en Excel con formato condicional ---
+                buffer_excel = io.BytesIO()
+                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                    df_to_excel = df_resultado[columnas_reporte].copy()
+                    df_to_excel.to_excel(writer, sheet_name='Reporte Horas Extra', index=False)
+
+                    workbook = writer.book
+                    worksheet = writer.sheets['Reporte Horas Extra']
+
+                    # Formatos
+                    orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'}) # Tarde
+                    gray_format = workbook.add_format({'bg_color': '#D9D9D9'}) # No calculado
+                    yellow_format = workbook.add_format({'bg_color': '#FFF2CC', 'font_color': '#3C3C3C'}) # Asumido
+                    
+                    # Aplica formatos condicionales basados en el dataframe original
+                    for row_num, row in df_resultado.iterrows():
+                        excel_row = row_num + 1
+                        
+                        is_calculated = row['Estado_Calculo'].startswith("Calculado") or row['Estado_Calculo'].startswith("ASUMIDO")
+                        is_late = row['Llegada_Tarde_Mas_40_Min']
+                        is_assumed = row['Estado_Calculo'].startswith("ASUMIDO")
+                        is_missing_entry = row['Estado_Calculo'].startswith("Falta Entrada")
+
+                        for col_idx, col_name in enumerate(df_to_excel.columns):
+                            value = row[col_name]
+                            cell_format = None
+                            
+                            # Prioridad 1: Marcación Faltante (gris)
+                            if is_missing_entry:
+                                cell_format = gray_format
+                            # Prioridad 2: No calculado (gris)
+                            elif not is_calculated and not is_assumed:
+                                cell_format = gray_format
+                            # Prioridad 3: Asumido (amarillo claro)
+                            elif is_assumed:
+                                cell_format = yellow_format
+                            # Prioridad 4: Llegada Tarde (naranja/rojo)
+                            elif col_name == 'ENTRADA_REAL' and is_late:
+                                cell_format = orange_format
+
+                            # Escribir el valor en la celda
+                            worksheet.write(excel_row, col_idx, value if pd.notna(value) else 'N/A', cell_format)
+
+                buffer_excel.seek(0)
+
+                st.download_button(
+                    label="Descargar Reporte de Horas Extra (Excel)",
+                    data=buffer_excel,
+                    file_name="Reporte_Marcacion_Horas_Extra.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                st.warning("No se encontraron jornadas válidas después de aplicar los filtros.")
+
+    except KeyError as e:
+        if 'BaseDatos Modificada' in str(e):
+             st.error(f"⚠️ ERROR: El archivo Excel debe contener una hoja llamada **'BaseDatos Modificada'**.")
+        else:
+             st.error(f"⚠️ ERROR: Faltan columnas requeridas o tienen nombres incorrectos. Asegúrate de tener: **COD_TRABAJADOR**, **NOMBRE**, **FECHA**, **HORA**, **PORTERIA**, **PuntoMarcacion**.")
+    except Exception as e:
+        st.error(f"Error crítico al procesar el archivo: {e}. Por favor, verifica el formato de los datos.")
+
+st.markdown("---")
+st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
