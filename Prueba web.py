@@ -67,6 +67,8 @@ MAX_EXCESO_SALIDA_HRS = 3
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time() 
 # Tolerancia para considerar la llegada como 'tarde' para el cálculo de horas.
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
+# Nueva tolerancia: Si la entrada es hasta 30 minutos antes, el conteo de horas comienza desde la entrada real.
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 30
 
 # --- 3. Obtener turno basado en fecha y hora ---
 
@@ -202,16 +204,29 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
                         duracion_total = salida_real - entrada_real
                         
+                        # Regla de cálculo por defecto: inicia en el turno programado
                         inicio_efectivo_calculo = inicio_turno
                         llegada_tarde_flag = False
                         
-                        # Criterio de Llegada Tarde: si la entrada es más tarde que el inicio programado más la tolerancia (40 min).
-                        if entrada_real > inicio_turno + timedelta(minutes=tolerancia_llegada_tarde):
+                        # 1. Regla para ENTRADA TEMPRANA (Máximo 30 minutos antes)
+                        limite_entrada_temprana = inicio_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
+                        
+                        # Si la entrada real cae entre el límite temprano (30 min antes) y el inicio de turno
+                        if entrada_real >= limite_entrada_temprana and entrada_real < inicio_turno:
+                            # Se cuenta desde la hora de entrada real, recompensando la anticipación.
+                            inicio_efectivo_calculo = entrada_real
+                            
+                        # 2. Regla para LLEGADA TARDE (Más de 40 minutos tarde)
+                        elif entrada_real > inicio_turno + timedelta(minutes=tolerancia_llegada_tarde):
+                            # Si llega tarde más la tolerancia (40 min), el cálculo inicia en la entrada real
                             inicio_efectivo_calculo = entrada_real
                             llegada_tarde_flag = True
-                            
-                        duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
                         
+                        # Si no cae en 1 o 2 (ej: llega a tiempo, llega muy temprano [> 30 min], o llega tarde [<= 40 min]),
+                        # el cálculo se mantiene en el valor por defecto: inicio_efectivo_calculo = inicio_turno.
+                        
+                        duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
+
                         if duracion_efectiva_calculo < timedelta(seconds=0):
                             horas_trabajadas = 0.0
                             horas_extra = 0.0
