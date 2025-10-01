@@ -35,7 +35,6 @@ TURNOS = {
 # --- 2. Configuración General ---
 
 # Lista de porterías/lugares considerados como válidos para Entrada/Salida de jornada
-# SE MANTIENE LA LISTA ORIGINAL SEGÚN REQUERIMIENTO DEL USUARIO
 LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_OFIC_PRODUCCION_ENT", "NOEL_MDE_OFIC_PRODUCCION_SAL", "NOEL_MDE_MR_TUNEL_VIENTO_1_ENT",
     "NOEL_MDE_MR_MEZCLAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_SAL",
@@ -110,10 +109,7 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date, tolerancia_minutos: int):
     """
     Busca el turno programado más cercano a la marcación de entrada,
-    verificando los turnos que inician en la FECHA_CLAVE_TURNO y,
-    si es temprano en la mañana, también los nocturnos del día anterior.
-
-    Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
+    utilizando una ventana de búsqueda de 3 horas antes del inicio programado.
     """
     mejor_turno_data = None
     menor_diferencia = timedelta(days=999)
@@ -129,10 +125,9 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # --- CAMBIO CLAVE: RANGO DE ENTRADA MÁS AMPLIO ---
-        # Límite inferior general: 4 horas antes del inicio programado.
-        # Esto permite que entradas tempranas (como 9:27am para un turno 11:40am) entren en competencia.
-        min_entrada_aceptable = inicio_posible_turno - timedelta(hours=4) 
+        # --- AJUSTE CLAVE: RANGO DE ENTRADA REDUCIDO A 3 HORAS ---
+        # Límite inferior general: 3 horas antes del inicio programado.
+        min_entrada_aceptable = inicio_posible_turno - timedelta(hours=3) 
         
         # Límite superior para la salida aceptable
         max_salida_aceptable = fin_posible_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
@@ -141,13 +136,13 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
         if fecha_hora_evento >= min_entrada_aceptable and fecha_hora_evento <= max_salida_aceptable:
 
             # La diferencia (el ajuste) se calcula entre la entrada real y el inicio PROGRAMADO del turno.
-            # La entrada con la menor diferencia (la más cercana al inicio programado) será elegida.
+            # Esta lógica garantiza que la entrada más cercana al turno programado sea elegida.
             diferencia = abs(fecha_hora_evento - inicio_posible_turno)
 
             if mejor_turno_data is None or diferencia < menor_diferencia:
                 mejor_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
                 menor_diferencia = diferencia
-        # --- FIN CAMBIO CLAVE ---
+        # --- FIN AJUSTE CLAVE ---
         
     return mejor_turno_data if mejor_turno_data else (None, None, None, None, None)
 
@@ -194,7 +189,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
                 current_entry_time = row['FECHA_HORA']
                 
                 # Intentar asignar un turno a esta marcación de entrada, permitiendo reasignación de fecha clave
-                # El valor de fecha_clave_turno que se pasa es el que se usa en la agrupación actual (Día X o Día X-1)
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno, tolerancia_minutos)
                 turno_nombre_temp, info_turno_temp, inicio_turno_temp, fin_turno_temp, fecha_clave_final_temp = turno_data
                 
@@ -258,9 +252,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
                 elif entrada_real < inicio_turno:
                     # Se cuenta desde la hora de entrada real.
                     inicio_efectivo_calculo = entrada_real
-                
-                # Si no cae en 1 o 2 (ej: llega a tiempo o ligeramente tarde [<= 40 min]),
-                # el cálculo se mantiene en el valor por defecto: inicio_efectivo_calculo = inicio_turno.
                 
                 duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
 
