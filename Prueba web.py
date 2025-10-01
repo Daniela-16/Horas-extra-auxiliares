@@ -116,11 +116,13 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     return mejor_turno if mejor_turno else (None, None, None, None)
 
-# --- 4. Calculo de horas (Selección de Min/Max) ---
+# --- 4. Calculo de horas (Selección de Min/Max y Priorización de Turno) ---
 
 def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_minutos: int, tolerancia_llegada_tarde: int):
     """
-    Agrupa por ID y FECHA_CLAVE_TURNO. Toma la ENTRADA MÁS TEMPRANA y la SALIDA MÁS TARDÍA válida.
+    Agrupa por ID y FECHA_CLAVE_TURNO. 
+    Prioriza la ENTRADA que mejor se alinea a un turno programado (ignorando entradas accesorias).
+    Toma la SALIDA MÁS TARDÍA válida posterior a esa entrada.
     """
     df_filtrado = df[(df['PORTERIA_NORMALIZADA'].isin(lugares_normalizados)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
     df_filtrado.sort_values(by=['ID_TRABAJADOR', 'FECHA_HORA'], inplace=True)
@@ -136,79 +138,98 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
         entradas = grupo[grupo['TIPO_MARCACION'] == 'ent']
         salidas = grupo[grupo['TIPO_MARCACION'] == 'sal']
 
-        # OBLIGATORIO: Selecciona la PRIMERA entrada de la jornada
-        entrada_real = entradas['FECHA_HORA'].min() if not entradas.empty else pd.NaT
-        
-        salida_real = pd.NaT
+        entrada_real = pd.NaT
         porteria_entrada = 'N/A'
+        salida_real = pd.NaT
         porteria_salida = 'N/A'
         turno_nombre, info_turno, inicio_turno, fin_turno = (None, None, None, None)
         horas_trabajadas = 0.0
         horas_extra = 0.0
         llegada_tarde_flag = False
         estado_calculo = "Sin Marcaciones Válidas (E/S)"
+        
+        mejor_entrada_para_turno = pd.NaT
+        mejor_turno_data = (None, None, None, None)
+        menor_diferencia_turno = timedelta(days=999)
 
-        if pd.notna(entrada_real):
-            # Obtiene la portería de la PRIMERA entrada
-            porteria_entrada = entradas[entradas['FECHA_HORA'] == entrada_real]['PORTERIA'].iloc[0]
-            
-            # --- 1. ASIGNAR EL TURNO BASADO EN LA PRIMERA ENTRADA ---
-            turno_nombre, info_turno, inicio_turno, fin_turno = obtener_turno_para_registro(entrada_real, fecha_clave_turno, tolerancia_minutos)
-            
-            if turno_nombre is None:
-                estado_calculo = "Turno No Asignado (Entrada fuera de rango de turnos)"
-            elif salidas.empty:
-                estado_calculo = "Falta Salida (Marcación de entrada OK)"
-            else:
-                # --- 2. FILTRO DE SALIDA VÁLIDA (Selecciona la MÁS TARDÍA) ---
+        # --- REVISIÓN CLAVE: Encontrar la mejor entrada que se alinee a un turno ---
+        if not entradas.empty:
+            for index, row in entradas.iterrows():
+                current_entry_time = row['FECHA_HORA']
                 
-                # Calcula el límite máximo de salida aceptable (Fin de Turno + Tolerancia de exceso)
-                max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
+                # Intentar asignar un turno a esta marcación de entrada
+                turno_nombre_temp, info_turno_temp, inicio_turno_temp, fin_turno_temp = obtener_turno_para_registro(current_entry_time, fecha_clave_turno, tolerancia_minutos)
                 
-                # Filtra las salidas que ocurrieron DESPUÉS de la entrada y DENTRO del límite aceptable
-                valid_salidas = salidas[
-                    (salidas['FECHA_HORA'] > entrada_real) & 
-                    (salidas['FECHA_HORA'] <= max_salida_aceptable)
-                ]
+                if turno_nombre_temp is not None:
+                    # Calcula la diferencia absoluta con el inicio programado (para encontrar el mejor ajuste)
+                    diferencia = abs(current_entry_time - inicio_turno_temp)
+                    
+                    if diferencia < menor_diferencia_turno:
+                        menor_diferencia_turno = diferencia
+                        mejor_entrada_para_turno = current_entry_time
+                        mejor_turno_data = (turno_nombre_temp, info_turno_temp, inicio_turno_temp, fin_turno_temp)
+
+            # Si se encontró un turno asociado a la mejor entrada
+            if pd.notna(mejor_entrada_para_turno):
+                entrada_real = mejor_entrada_para_turno
+                turno_nombre, info_turno, inicio_turno, fin_turno = mejor_turno_data
                 
-                if valid_salidas.empty:
-                    estado_calculo = "Sin Salida Válida (Todas las salidas son antes de la entrada o exceden el límite de 3h)"
+                # Obtener porteria de la entrada real
+                porteria_entrada = entradas[entradas['FECHA_HORA'] == entrada_real]['PORTERIA'].iloc[0]
+                
+                if salidas.empty:
+                    estado_calculo = "Falta Salida (Turno Asignado)"
                 else:
-                    # Reasigna la SALIDA REAL a la ÚLTIMA salida VÁLIDA del grupo
-                    salida_real = valid_salidas['FECHA_HORA'].max()
-                    porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0]
+                    # --- 2. FILTRO DE SALIDA VÁLIDA (Selecciona la MÁS TARDÍA) ---
                     
-                    # --- 3. REGLAS DE CÁLCULO ---
-
-                    duracion_total = salida_real - entrada_real
+                    # Calcula el límite máximo de salida aceptable (Fin de Turno + Tolerancia de exceso)
+                    max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
                     
-                    inicio_efectivo_calculo = inicio_turno
-                    llegada_tarde_flag = False
+                    # Filtra las salidas que ocurrieron DESPUÉS de la ENTRADA REAL seleccionada y DENTRO del límite aceptable
+                    valid_salidas = salidas[
+                        (salidas['FECHA_HORA'] > entrada_real) & 
+                        (salidas['FECHA_HORA'] <= max_salida_aceptable)
+                    ]
                     
-                    # Criterio de Llegada Tarde para el cálculo: si la entrada es más tarde que el inicio 
-                    # programado más la tolerancia (40 min).
-                    if entrada_real > inicio_turno + timedelta(minutes=tolerancia_llegada_tarde):
-                        inicio_efectivo_calculo = entrada_real
-                        llegada_tarde_flag = True
-                        
-                    duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
-                    
-                    if duracion_efectiva_calculo < timedelta(seconds=0):
-                        # Esto puede pasar si entrada_real es tardía y salida_real es muy temprana
-                        horas_trabajadas = 0.0
-                        horas_extra = 0.0
-                        estado_calculo = "Error: Duración efectiva negativa (Entrada muy tarde / Salida muy temprano)"
+                    if valid_salidas.empty:
+                        estado_calculo = "Sin Salida Válida (Salida antes de la entrada o excede el límite de 3h)"
                     else:
-                        horas_trabajadas = round(duracion_efectiva_calculo.total_seconds() / 3600, 2)
+                        # Reasigna la SALIDA REAL a la ÚLTIMA salida VÁLIDA del grupo
+                        salida_real = valid_salidas['FECHA_HORA'].max()
+                        porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0]
                         
-                        horas_turno = info_turno["duracion_hrs"]
+                        # --- 3. REGLAS DE CÁLCULO ---
+
+                        duracion_total = salida_real - entrada_real
                         
-                        if duracion_total < timedelta(hours=4):
-                            estado_calculo = "Jornada Corta (< 4h de Ent-Sal)"
+                        inicio_efectivo_calculo = inicio_turno
+                        llegada_tarde_flag = False
+                        
+                        # Criterio de Llegada Tarde: si la entrada es más tarde que el inicio programado más la tolerancia (40 min).
+                        if entrada_real > inicio_turno + timedelta(minutes=tolerancia_llegada_tarde):
+                            inicio_efectivo_calculo = entrada_real
+                            llegada_tarde_flag = True
+                            
+                        duracion_efectiva_calculo = salida_real - inicio_efectivo_calculo
+                        
+                        if duracion_efectiva_calculo < timedelta(seconds=0):
+                            horas_trabajadas = 0.0
                             horas_extra = 0.0
+                            estado_calculo = "Error: Duración efectiva negativa"
                         else:
-                            horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
-                            estado_calculo = "Calculado"
+                            horas_trabajadas = round(duracion_efectiva_calculo.total_seconds() / 3600, 2)
+                            
+                            horas_turno = info_turno["duracion_hrs"]
+                            
+                            if duracion_total < timedelta(hours=4):
+                                estado_calculo = "Jornada Corta (< 4h de Ent-Sal)"
+                                horas_extra = 0.0
+                            else:
+                                horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
+                                estado_calculo = "Calculado"
+
+            else:
+                estado_calculo = "Turno No Asignado (Entradas existen, pero ninguna se alinea con un turno programado)"
 
         elif pd.isna(entrada_real) and not salidas.empty:
             estado_calculo = "Falta Entrada (Salida marcada)"
@@ -247,7 +268,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
-st.write("Sube tu archivo de Excel para calcular las horas extra del personal. El sistema toma la **Entrada más temprana** y la **Salida más tardía válida** por turno.")
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal. El sistema toma la **Entrada más cercana al turno programado** y la **Salida más tardía válida** posterior a esa entrada.")
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
