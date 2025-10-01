@@ -190,6 +190,20 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
             # Si se encontró un turno asociado a la mejor entrada
             if pd.notna(mejor_entrada_para_turno):
+                turno_nombre, info_turno, inicio_turno, fin_turno = mejor_turno_data
+                
+                # *** NUEVA REGLA: Prevención de Asignación de Turno Diurno a Marcación Matutina Accidental ***
+                # Si el mejor turno encontrado NO es un Turno 3 (nocturno) Y la marcación de entrada es ANTES de las 05:40 AM,
+                # esta marcación es probablemente accesoria de un turno nocturno cuyo inicio no está en el archivo.
+                # Rechazamos la asignación para evitar falsos Turno 1.
+                if not turno_nombre.startswith("Turno 3") and mejor_entrada_para_turno.time() < datetime.strptime("05:40:00", "%H:%M:%S").time():
+                    estado_calculo = "Entrada Matutina No Alineada a Turno Nocturno (Ignorado)"
+                    # Reseteamos los datos para caer en el estado de "Turno No Asignado"
+                    mejor_entrada_para_turno = pd.NaT 
+                    mejor_turno_data = (None, None, None, None) 
+                
+            # Continuar solo si el turno no fue invalidado
+            if pd.notna(mejor_entrada_para_turno):
                 entrada_real = mejor_entrada_para_turno
                 turno_nombre, info_turno, inicio_turno, fin_turno = mejor_turno_data
                 
@@ -263,7 +277,13 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_min
 
 
             else:
+                # Cae aquí si la entrada fue invalidada por la nueva regla o no se encontró ninguna entrada coincidente
                 estado_calculo = "Turno No Asignado (Entradas existen, pero ninguna se alinea con un turno programado)"
+                # Se mantiene el estado de "Entrada Matutina No Alineada..." si fue el caso.
+                if "Entrada Matutina" in estado_calculo:
+                    pass
+                else:
+                    estado_calculo = "Turno No Asignado (Entradas existen, pero ninguna se alinea con un turno programado)"
 
         elif pd.isna(entrada_real) and not salidas.empty:
             estado_calculo = "Falta Entrada (Salida marcada)"
@@ -415,14 +435,14 @@ if archivo_excel is not None:
                         
                         is_calculated = row['Estado_Calculo'] in ["Calculado", "ASUMIDO (Falta Salida/Salida Inválida)"]
                         is_late = row['Llegada_Tarde_Mas_40_Min']
-                        is_assumed = row['Estado_Calculo'].startswith("ASUMIDO")
+                        is_assumed = row['Estado_Calculo'].startswith("ASUMIDO") or row['Estado_Calculo'].startswith("Entrada Matutina")
 
                         for col_idx, col_name in enumerate(df_to_excel.columns):
                             value = row[col_name]
                             cell_format = None
                             
-                            # Prioridad 1: No calculado (gris)
-                            if not is_calculated and not is_assumed:
+                            # Prioridad 1: No calculado / Ignorado (gris)
+                            if row['Estado_Calculo'] in ["Turno No Asignado (Entradas existen, pero ninguna se alinea con un turno programado)", "Entrada Matutina No Alineada a Turno Nocturno (Ignorado)", "Error: Duración efectiva negativa"]:
                                 cell_format = gray_format
                             # Prioridad 2: Asumido (amarillo claro)
                             elif is_assumed:
