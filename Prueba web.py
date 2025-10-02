@@ -77,11 +77,16 @@ MAX_EXCESO_SALIDA_HRS = 3
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
 # --- CONSTANTES DE TOLERANCIA REVISADAS ---
-# (La constante 'TOLERANCIA_INFERENCIA_MINUTOS' de 50 minutos se vuelve redundante y se reemplaza por las siguientes)
 # Tolerancia para considerar la llegada como 'tarde' para el cálculo de horas. (Usado en el cálculo de Horas)
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
-# Tolerancia para considerar la llegada como 'temprana' (Usado para definir la ventana de asignación de turno)
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 120 # 2 horas antes de lo programado
+# Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno.
+# Actualizado a 3 horas (180 minutos)
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 180 
+
+# --- CONSTANTE DE PAGO POR ANTELACIÓN (NUEVA) ---
+# Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
+# Si la antelación es > 30 minutos, se paga desde la entrada real. Si es <= 30 minutos, se paga desde el inicio programado.
+UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30 # 30 minutos
 
 # --- 3. Obtener turno basado en fecha y hora (REVISIÓN DE DÍA ANTERIOR AÑADIDA) ---
 
@@ -118,7 +123,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     verificando los turnos que inician en la FECHA_CLAVE_TURNO y,
     si es temprano en la mañana, también los nocturnos del día anterior.
 
-    NOTA CLAVE: Este chequeo solo acepta entradas dentro de una ventana de 2 horas antes
+    NOTA CLAVE: Este chequeo solo acepta entradas dentro de una ventana de 3 horas antes
     y 45 minutos después del inicio programado, forzando un emparejamiento con el inicio del turno.
 
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
@@ -137,8 +142,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (El cambio clave) ---
-        # 1. El límite más temprano que aceptamos la entrada (2 horas antes)
+        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA ---
+        # 1. El límite más temprano que aceptamos la entrada (3 horas antes = 180 minutos)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
         
         # 2. El límite más tardío que aceptamos la entrada (45 minutos después del inicio programado: 40 + 5 min buffer)
@@ -198,8 +203,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 current_entry_time = row['FECHA_HORA']
                 
                 # Intentar asignar un turno a esta marcación de entrada, permitiendo reasignación de fecha clave
-                # El valor de fecha_clave_turno que se pasa es el que se usa en la agrupación actual (Día X o Día X-1)
-                # NOTA: Se ha quitado el argumento de tolerancia ya que se maneja internamente con TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 turno_nombre_temp, info_turno_temp, inicio_turno_temp, fin_turno_temp, fecha_clave_final_temp = turno_data
                 
@@ -226,8 +229,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
                 
                 # Filtra las salidas que ocurrieron DESPUÉS de la ENTRADA REAL seleccionada y DENTRO del límite aceptable
-                # Buscamos en todo el DataFrame filtrado, no solo en el grupo actual, para asegurar que la salida
-                # sea capturada aunque haya sido agrupada inicialmente en una FECHA_CLAVE_TURNO diferente (aunque rara vez pasaría).
                 valid_salidas = df_filtrado[
                     (df_filtrado['ID_TRABAJADOR'] == id_trabajador) &
                     (df_filtrado['TIPO_MARCACION'] == 'sal') &
@@ -237,7 +238,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 
                 if valid_salidas.empty:
                     # SI NO HAY SALIDA VÁLIDA: ASUMIR SALIDA A LA HORA PROGRAMADA DEL FIN DE TURNO
-                    # Esto maneja perfectamente el caso del último día del reporte.
                     salida_real = fin_turno
                     porteria_salida = 'ASUMIDA (FIN TURNO)'
                     estado_calculo = "ASUMIDO (Falta Salida/Salida Inválida)"
@@ -262,10 +262,20 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                     inicio_efectivo_calculo = entrada_real
                     llegada_tarde_flag = True
                     
-                # 2. Regla para ENTRADA TEMPRANA (Cualquier entrada antes del inicio programado)
+                # 2. Regla para ENTRADA TEMPRANA (Cualquier entrada antes del inicio programado) - NUEVA LÓGICA DE PAGO
                 elif entrada_real < inicio_turno:
-                    # Se cuenta desde la hora de entrada real.
-                    inicio_efectivo_calculo = entrada_real
+                    
+                    # Calcular el tiempo de antelación
+                    early_timedelta = inicio_turno - entrada_real
+                    
+                    # Regla: Si la antelación es mayor a 30 minutos, se paga desde la hora de entrada real.
+                    if early_timedelta > timedelta(minutes=UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS):
+                        # Caso 1: Muy temprano (> 30 minutos antes) -> Contar desde la hora real de entrada
+                        inicio_efectivo_calculo = entrada_real
+                    
+                    else:
+                        # Caso 2: Temprano (<= 30 minutos antes) -> Contar desde el inicio programado
+                        inicio_efectivo_calculo = inicio_turno
                 
                 # Si no cae en 1 o 2 (ej: llega a tiempo o ligeramente tarde [<= 40 min]),
                 # el cálculo se mantiene en el valor por defecto: inicio_efectivo_calculo = inicio_turno.
@@ -494,6 +504,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
