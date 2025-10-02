@@ -88,6 +88,12 @@ TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 180
 # Si la antelación es > 30 minutos, se paga desde la entrada real. Si es <= 30 minutos, se paga desde el inicio programado.
 UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30 # 30 minutos
 
+# --- CONSTANTE DE LÓGICA DE BORDES (NUEVA) ---
+# Tiempo mínimo aceptable para una jornada que terminó con una SALIDA REAL. 
+# Si la duración es menor a este umbral (ej: 1 hora) y se usó una SALIDA REAL, se ignora esa salida
+# y se fuerza la ASSUMPCIÓN al fin de turno programado.
+MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
+
 # --- 3. Obtener turno basado en fecha y hora (REVISIÓN DE DÍA ANTERIOR AÑADIDA) ---
 
 def buscar_turnos_posibles(fecha_clave: datetime.date):
@@ -192,6 +198,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
         horas_extra = 0.0
         llegada_tarde_flag = False
         estado_calculo = "Sin Marcaciones Válidas (E/S)"
+        salida_fue_real = False # Flag para saber si se usó una marcación real de salida
+        
 
         mejor_entrada_para_turno = pd.NaT
         mejor_turno_data = (None, None, None, None, None)
@@ -239,14 +247,27 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 if valid_salidas.empty:
                     # SI NO HAY SALIDA VÁLIDA: ASUMIR SALIDA A LA HORA PROGRAMADA DEL FIN DE TURNO
                     salida_real = fin_turno
-                    porteria_salida = 'ASUMIDA (FIN TURNO)'
+                    porteria_salida = 'ASUMIDA (Falta Salida/Salida Inválida)'
                     estado_calculo = "ASUMIDO (Falta Salida/Salida Inválida)"
+                    salida_fue_real = False
                 else:
                     # Usar la última salida REAL válida
                     salida_real = valid_salidas['FECHA_HORA'].max()
                     porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['PORTERIA'].iloc[0]
                     estado_calculo = "Calculado"
+                    salida_fue_real = True
                     
+                # --- REGLA DE ROBUSTEZ ADICIONAL PARA MICRO-MARCACIONES ---
+                # Si se usó una SALIDA REAL, pero la duración es muy corta (< 1 hora), 
+                # forzamos la ASSUMPCIÓN al fin de turno para evitar el problema de jornadas de 2 minutos.
+                if salida_fue_real:
+                    duracion_check = salida_real - entrada_real
+                    if duracion_check < timedelta(hours=MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS):
+                         salida_real = fin_turno
+                         porteria_salida = 'ASUMIDA (Micro-jornada detectada)'
+                         estado_calculo = "ASUMIDO (Micro-jornada detectada)"
+                         salida_fue_real = False
+
                 # --- 3. REGLAS DE CÁLCULO DE HORAS ---
 
                 # La duración total es el tiempo entre la entrada real y la salida (real o asumida)
@@ -292,13 +313,21 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                     horas_turno = info_turno["duracion_hrs"]
                     
                     # Para jornadas asumidas, aún se aplica el cálculo de horas extra si la duración supera el turno.
-                    if duracion_total < timedelta(hours=4) and estado_calculo != "ASUMIDO (Falta Salida/Salida Inválida)":
-                        estado_calculo = "Jornada Corta (< 4h de Ent-Sal)"
+                    # Mantenemos esta regla para jornadas que no fueron ni Calculadas (por micro-jornada) ni Asumidas.
+                    if duracion_total < timedelta(hours=4) and estado_calculo == "Jornada Corta (< 4h de Ent-Sal)":
+                        # Solo se aplica si el estado no fue modificado por la detección de micro-jornada
                         horas_extra = 0.0
                     else:
                         horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
-                        if estado_calculo == "Calculado":
-                            estado_calculo = "Calculado" # Mantener "Calculado" si se usaron entradas/salidas reales.
+                        if estado_calculo == "Calculado" and not salida_fue_real:
+                            # Si se forzó la asunción por micro-jornada, el estado ya está bien.
+                            pass
+                        elif estado_calculo == "Calculado":
+                            # Mantener "Calculado" si se usaron entradas/salidas reales.
+                            estado_calculo = "Calculado" 
+                        elif estado_calculo == "ASUMIDO (Micro-jornada detectada)":
+                            # Si se forzó la asunción por micro-jornada, usar este estado
+                            pass
 
             else:
                 estado_calculo = "Turno No Asignado (Entradas existen, pero ninguna se alinea con un turno programado)"
@@ -504,7 +533,3 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
-
-
