@@ -94,6 +94,10 @@ UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30 # 30 minutos
 # y se fuerza la ASSUMPCIÓN al fin de turno programado.
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 
+# --- CONSTANTE DE FILTRADO DE HORAS EXTRA (NUEVA) ---
+# Umbral en horas para resaltar las Horas Extra (40 minutos / 60 minutos = 0.6666...)
+UMBRAL_HORAS_EXTRA_RESALTAR = 40 / 60 
+
 # --- 3. Obtener turno basado en fecha y hora (REVISIÓN DE DÍA ANTERIOR AÑADIDA) ---
 
 def buscar_turnos_posibles(fecha_clave: datetime.date):
@@ -498,10 +502,17 @@ if archivo_excel is not None:
                 worksheet = writer.sheets['Reporte Horas Extra']
 
                 # Formatos
-                orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'}) # Tarde
+                orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'}) # Tarde (> 40 min)
                 gray_format = workbook.add_format({'bg_color': '#D9D9D9'}) # No calculado
                 yellow_format = workbook.add_format({'bg_color': '#FFF2CC', 'font_color': '#3C3C3C'}) # Asumido
+                # Nuevo formato para Horas Extra > 40 minutos (Rojo/Naranja Fuerte)
+                red_extra_format = workbook.add_format({'bg_color': '#F8E8E8', 'font_color': '#D83A56', 'bold': True})
                 
+                # Obtener los índices de las columnas de Horas Extra
+                col_idx_extra = df_to_excel.columns.get_loc('Horas_Extra')
+                col_idx_horas = df_to_excel.columns.get_loc('Horas')
+                col_idx_minutos = df_to_excel.columns.get_loc('Minutos')
+
                 # Aplica formatos condicionales basados en el dataframe original
                 for row_num, row in df_resultado.iterrows():
                     excel_row = row_num + 1
@@ -510,23 +521,27 @@ if archivo_excel is not None:
                     is_late = row['Llegada_Tarde_Mas_40_Min']
                     is_assumed = row['Estado_Calculo'].startswith("ASUMIDO")
                     is_missing_entry = row['Estado_Calculo'].startswith("Falta Entrada")
+                    
+                    # NUEVA LÓGICA DE RESALTADO DE HORAS EXTRA
+                    # Verifica si las horas extra son mayores al umbral de 40 minutos (0.666 horas)
+                    is_excessive_extra = row['Horas_Extra'] > UMBRAL_HORAS_EXTRA_RESALTAR
 
                     for col_idx, col_name in enumerate(df_to_excel.columns):
                         value = row[col_name]
                         cell_format = None
                         
-                        # Prioridad 1: Marcación Faltante (gris, incluyendo el caso del primer día)
-                        if is_missing_entry:
+                        # Prioridad 1: Marcación Faltante (gris)
+                        if is_missing_entry or (not is_calculated and not is_assumed):
                             cell_format = gray_format
-                        # Prioridad 2: No calculado (gris)
-                        elif not is_calculated and not is_assumed:
-                            cell_format = gray_format
-                        # Prioridad 3: Asumido (amarillo claro)
+                        # Prioridad 2: Asumido (amarillo claro)
                         elif is_assumed:
                             cell_format = yellow_format
-                        # Prioridad 4: Llegada Tarde (naranja/rojo)
+                        # Prioridad 3: Llegada Tarde (naranja/rojo) en la columna ENTRADA_REAL
                         elif col_name == 'ENTRADA_REAL' and is_late:
                             cell_format = orange_format
+                        # Prioridad 4: Horas Extra > 40 minutos (Rojo/Naranja Fuerte)
+                        elif is_excessive_extra and col_name in ['Horas_Extra', 'Horas', 'Minutos']:
+                            cell_format = red_extra_format
 
                         # Escribir el valor en la celda
                         worksheet.write(excel_row, col_idx, value if pd.notna(value) else 'N/A', cell_format)
