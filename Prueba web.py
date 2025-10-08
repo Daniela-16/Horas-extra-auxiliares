@@ -13,7 +13,7 @@ import numpy as np
 # --- 1. Definición de los Turnos ---
 # NOTA: Los horarios de los turnos definen el rango de búsqueda para el turno más cercano a la entrada real.
 TURNOS = {
-    "LV": { # Lunes a Viernes (0-4)
+    "LV": { # Lunes a Viernes (0-4)
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
         # Turno nocturno: Inicia un día y termina al día siguiente
