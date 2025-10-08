@@ -174,10 +174,13 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
     Agrupa por ID y FECHA_CLAVE_TURNO.
     Prioriza la ENTRADA que mejor se alinea a un turno programado,
     usando la lógica robusta que puede reasignar la FECHA_CLAVE_TURNO.
+    
+    Nota: Se usan los nombres de columnas en minúscula que fueron normalizados y renombrados
+    en la función de carga: 'id_trabajador', 'nombre', 'porteria', etc.
     """
     
-    # Se usan los nombres de columnas en minúscula que fueron normalizados en la carga.
     df_filtrado = df[(df['PORTERIA_NORMALIZADA'].isin(lugares_normalizados)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
+    # Usando 'id_trabajador' (renombrada) y 'FECHA_HORA'
     df_filtrado.sort_values(by=['id_trabajador', 'FECHA_HORA'], inplace=True)
 
     if df_filtrado.empty: return pd.DataFrame()
@@ -230,7 +233,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 entrada_real = mejor_entrada_para_turno
                 turno_nombre, info_turno, inicio_turno, fin_turno, fecha_clave_final = mejor_turno_data
                 
-                # Obtener porteria de la entrada real (usando el nombre de columna en minúscula)
+                # Obtener porteria de la entrada real (usando el nombre de columna en minúscula 'porteria')
                 porteria_entrada = entradas[entradas['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
                 
                 # --- REVISIÓN CLAVE 2: Filtro y/o Inferencia de Salida ---
@@ -255,7 +258,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 else:
                     # Usar la última salida REAL válida
                     salida_real = valid_salidas['FECHA_HORA'].max()
-                    # Usando el nombre de columna en minúscula
+                    # Usando el nombre de columna en minúscula 'porteria'
                     porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['porteria'].iloc[0]
                     estado_calculo = "Calculado"
                     salida_fue_real = True
@@ -386,23 +389,26 @@ if archivo_excel is not None:
         # Intenta leer la hoja específica 'BaseDatos Modificada'
         df_raw = pd.read_excel(archivo_excel, sheet_name='Modificada')
 
-        # 1. Definir la lista de nombres de columna requeridos en MINÚSCULAS para la búsqueda.
-        columnas_requeridas_lower = ['cod_trabajador', 'nombre', 'fecha', 'hora', 'porteria', 'puntomarcacion']
+        # 1. Definir la lista de nombres de columna que esperamos DESPUÉS de convertirlos a minúsculas
+        columnas_requeridas_lower = [
+            'cc', 'codtrabajador', 'nombre', 'fecha', 'hora', 'porteria', 'puntomarcacion'
+        ]
         
         # 2. Crear un mapeo de nombres de columna actuales a sus versiones en minúscula.
+        # ESTE PASO GARANTIZA LA ROBUSTEZ A MAYÚSCULAS/MINÚSCULAS
         col_map = {col: col.lower() for col in df_raw.columns}
         df_raw.rename(columns=col_map, inplace=True)
 
         # 3. Validar la existencia de todas las columnas requeridas normalizadas.
         if not all(col in df_raw.columns for col in columnas_requeridas_lower):
-            st.error(f"⚠️ ERROR: Faltan columnas requeridas o tienen nombres incorrectos. Asegúrate de tener: **COD_TRABAJADOR**, **NOMBRE**, **FECHA**, **HORA**, **PORTERIA**, **PuntoMarcacion** (en cualquier formato de mayúsculas/minúsculas).")
+            st.error(f"⚠️ ERROR: Faltan columnas requeridas o tienen nombres incorrectos. Asegúrate de tener: **Cc, CodTrabajador, Nombre, Fecha, Hora, Porteria, PuntoMarcacion** (en cualquier formato de mayúsculas/minúsculas).")
             st.stop()
 
-        # 4. Seleccionar las columnas normalizadas y renombrar 'cod_trabajador'.
+        # 4. Seleccionar las columnas normalizadas y renombrar 'codtrabajador' a 'id_trabajador'.
         df_raw = df_raw[columnas_requeridas_lower].copy()
-        df_raw.rename(columns={'cod_trabajador': 'id_trabajador'}, inplace=True)
+        df_raw.rename(columns={'codtrabajador': 'id_trabajador'}, inplace=True)
         
-        # Preprocesamiento inicial de columnas (ajustado para usar nombres en minúsculas)
+        # Preprocesamiento inicial de columnas (usando 'fecha')
         df_raw['fecha'] = pd.to_datetime(df_raw['fecha'], errors='coerce')  
         df_raw.dropna(subset=['fecha'], inplace=True)
             
@@ -429,21 +435,19 @@ if archivo_excel is not None:
         df_raw['hora'] = df_raw['hora'].apply(standardize_time_format)
             
         try:
-            # Ahora usamos los nombres de columna en minúsculas
+            # Usando 'fecha' y 'hora' normalizadas
             df_raw['FECHA_HORA'] = pd.to_datetime(df_raw['fecha'].dt.strftime('%Y-%m-%d') + ' ' + df_raw['hora'], errors='coerce')
             df_raw.dropna(subset=['FECHA_HORA'], inplace=True)
         except Exception as e:
             st.error(f"Error al combinar FECHA y HORA. Revisa el formato de la columna HORA: {e}")
             st.stop() 
 
-        # Normalización de las otras columnas de marcación (usando nombres en minúsculas)
+        # Normalización de las otras columnas de marcación (usando 'porteria' y 'puntomarcacion')
         df_raw['PORTERIA_NORMALIZADA'] = df_raw['porteria'].astype(str).str.strip().str.lower()
-        # Mapeo de PuntoMarcacion a 'ent' o 'sal' (usando el nombre de columna en minúscula 'puntomarcacion')
+        # Mapeo de PuntoMarcacion a 'ent' o 'sal' (usando 'puntomarcacion')
         df_raw['TIPO_MARCACION'] = df_raw['puntomarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
 
         # --- Función para asignar Fecha Clave de Turno (Lógica Nocturna) ---
-        # Se mantiene la lógica de agrupación inicial: Entrada ancla al día de entrada. Salida matutina
-        # ancla al día anterior.
         def asignar_fecha_clave_turno_corregida(row):
             fecha_original = row['FECHA_HORA'].date()
             hora_marcacion = row['FECHA_HORA'].time()
@@ -454,7 +458,6 @@ if archivo_excel is not None:
                 return fecha_original
             
             # Regla nocturna: Las SALIDAS antes del corte se asocian al turno del día anterior.
-            # Esto es crucial para agrupar Entrada (Día 1 Noche) y Salida (Día 2 Madrugada).
             if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
                 return fecha_original - timedelta(days=1)
             
