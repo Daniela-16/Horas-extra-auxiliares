@@ -381,7 +381,7 @@ archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 if archivo_excel is not None:
     try:
         # Intenta leer la hoja específica 'BaseDatos Modificada'
-        df_raw = pd.read_excel(archivo_excel, sheet_name='BaseDatos Modificada')
+        df_raw = pd.read_excel(archivo_excel, sheet_name='Modificada')
 
         columnas = ['COD_TRABAJADOR', 'NOMBRE', 'FECHA', 'HORA', 'PORTERIA', 'PuntoMarcacion']
         if not all(col in df_raw.columns for col in columnas):
@@ -533,3 +533,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
