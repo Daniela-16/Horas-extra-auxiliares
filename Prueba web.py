@@ -391,7 +391,7 @@ archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 if archivo_excel is not None:
     try:
         # Intenta leer la hoja específica 'BaseDatos Modificada'
-        df_raw = pd.read_excel(archivo_excel, sheet_name='Modificada')
+        df_raw = pd.read_excel(archivo_excel, sheet_name='data')
 
         # 1. Definir la lista de nombres de columna que esperamos DESPUÉS de convertirlos a minúsculas
         columnas_requeridas_lower = [
@@ -567,4 +567,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
