@@ -95,7 +95,7 @@ UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30 # 30 minutos
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 
 # --- CONSTANTE DE FILTRADO DE HORAS EXTRA (NUEVA) ---
-# Umbral en horas para resaltar las Horas Extra (30 minutos / 60 minutos = 0.5 horas)
+# Umbral en horas para resaltar las Horas Extra (40 minutos / 60 minutos = 0.6666...)
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
 # --- 3. Obtener turno basado en fecha y hora (REVISIÓN DE DÍA ANTERIOR AÑADIDA) ---
@@ -505,7 +505,7 @@ if archivo_excel is not None:
                 orange_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'}) # Tarde (> 40 min)
                 gray_format = workbook.add_format({'bg_color': '#D9D9D9'}) # No calculado
                 yellow_format = workbook.add_format({'bg_color': '#FFF2CC', 'font_color': '#3C3C3C'}) # Asumido
-                # Nuevo formato para Horas Extra > 30 minutos (Rojo/Naranja Fuerte)
+                # Nuevo formato para Horas Extra > 40 minutos (Rojo/Naranja Fuerte)
                 red_extra_format = workbook.add_format({'bg_color': '#F8E8E8', 'font_color': '#D83A56', 'bold': True})
                 
                 # Obtener los índices de las columnas de Horas Extra
@@ -520,10 +520,10 @@ if archivo_excel is not None:
                     is_calculated = row['Estado_Calculo'] in ["Calculado", "ASUMIDO (Falta Salida/Salida Inválida)"]
                     is_late = row['Llegada_Tarde_Mas_40_Min']
                     is_assumed = row['Estado_Calculo'].startswith("ASUMIDO")
-                    is_missing_entry = row['Estado_Calculo'].startswith("Falta Entrada") or row['Estado_Calculo'].startswith("Turno No Asignado")
+                    is_missing_entry = row['Estado_Calculo'].startswith("Falta Entrada")
                     
-                    # NUEVA LÓGICA DE RESALTADO DE HORAS EXTRA (Se aplica a Calculado y Asumido)
-                    # Verifica si las horas extra son mayores al umbral de 30 minutos (0.5 horas)
+                    # NUEVA LÓGICA DE RESALTADO DE HORAS EXTRA
+                    # Verifica si las horas extra son mayores al umbral de 40 minutos (0.666 horas)
                     is_excessive_extra = row['Horas_Extra'] > UMBRAL_HORAS_EXTRA_RESALTAR
 
                     for col_idx, col_name in enumerate(df_to_excel.columns):
@@ -531,29 +531,29 @@ if archivo_excel is not None:
                         cell_format = None
                         
                         # Prioridad 1: Marcación Faltante (gris)
-                        if is_missing_entry:
+                        if is_missing_entry or (not is_calculated and not is_assumed):
                             cell_format = gray_format
-                        # Prioridad 2: Horas Extra > 30 minutos (Rojo/Naranja Fuerte) - Aplica sobre Asumido y Calculado
-                        elif is_excessive_extra and col_name in ['Horas_Extra', 'Horas', 'Minutos']:
-                            cell_format = red_extra_format
-                        # Prioridad 3: Asumido (amarillo claro) - Si no tiene Horas Extra excesivas, se queda amarillo.
+                        # Prioridad 2: Asumido (amarillo claro)
                         elif is_assumed:
                             cell_format = yellow_format
-                        # Prioridad 4: Llegada Tarde (naranja/rojo) en la columna ENTRADA_REAL
+                        # Prioridad 3: Llegada Tarde (naranja/rojo) en la columna ENTRADA_REAL
                         elif col_name == 'ENTRADA_REAL' and is_late:
                             cell_format = orange_format
+                        # Prioridad 4: Horas Extra > 40 minutos (Rojo/Naranja Fuerte)
+                        elif is_excessive_extra and col_name in ['Horas_Extra', 'Horas', 'Minutos']:
+                            cell_format = red_extra_format
 
                         # Escribir el valor en la celda
                         worksheet.write(excel_row, col_idx, value if pd.notna(value) else 'N/A', cell_format)
 
-                buffer_excel.seek(0)
+            buffer_excel.seek(0)
 
-                st.download_button(
-                    label="Descargar Reporte de Horas Extra (Excel)",
-                    data=buffer_excel,
-                    file_name="Reporte_Marcacion_Horas_Extra.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+            st.download_button(
+                label="Descargar Reporte de Horas Extra (Excel)",
+                data=buffer_excel,
+                file_name="Reporte_Marcacion_Horas_Extra.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
         else:
             st.warning("No se encontraron jornadas válidas después de aplicar los filtros.")
 
