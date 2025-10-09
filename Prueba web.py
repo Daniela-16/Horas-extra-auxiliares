@@ -96,7 +96,7 @@ MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 
 # --- CONSTANTE DE FILTRADO DE HORAS EXTRA (NUEVA) ---
 # Umbral en horas para resaltar las Horas Extra (40 minutos / 60 minutos = 0.6666...)
-UMBRAL_HORAS_EXTRA_RESALTAR = 40 / 60 
+UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
 # --- 3. Obtener turno basado en fecha y hora (REVISIÓN DE DÍA ANTERIOR AÑADIDA) ---
 
@@ -567,3 +567,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
