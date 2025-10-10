@@ -390,7 +390,7 @@ archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
 if archivo_excel is not None:
     try:
-        # Intenta leer la hoja específica 'BaseDatos Modificada'
+        # Intenta leer la hoja específica 
         df_raw = pd.read_excel(archivo_excel, sheet_name='data')
 
         # 1. Definir la lista de nombres de columna que esperamos DESPUÉS de convertirlos a minúsculas
@@ -555,7 +555,7 @@ if archivo_excel is not None:
             st.download_button(
                 label="Descargar Reporte de Horas Extra (Excel)",
                 data=buffer_excel,
-                file_name="Reporte_Marcacion_Horas_Extra_Formato_Condicional.xlsx",
+                file_name="Reporte_Marcacion_Horas_Extra.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         else:
@@ -571,6 +571,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
