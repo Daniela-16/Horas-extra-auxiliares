@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Calculadora de Horas Extra.
-Versión Mejorada: Implementa Búsqueda Robusta de Turno Nocturno y Manejo de Bordes.
 """
 
 import pandas as pd
@@ -11,7 +10,7 @@ import io
 import numpy as np
 
 # --- 1. Definición de los Turnos ---
-# NOTA: Los horarios de los turnos definen el rango de búsqueda para el turno más cercano a la entrada real.
+
 TURNOS = {
     "LV": { # Lunes a Viernes (0-4)
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
@@ -35,6 +34,7 @@ TURNOS = {
 # --- 2. Configuración General ---
 
 # Lista de porterías/lugares considerados como válidos para Entrada/Salida de jornada
+
 LUGARES_TRABAJO_PRINCIPAL = [
     "NOEL_MDE_OFIC_PRODUCCION_ENT", "NOEL_MDE_OFIC_PRODUCCION_SAL", "NOEL_MDE_MR_TUNEL_VIENTO_1_ENT",
     "NOEL_MDE_MR_MEZCLAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_ENT", "NOEL_MDE_ING_MEN_CREMAS_SAL",
@@ -73,32 +73,32 @@ LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUG
 
 # Máximo de horas después del fin de turno programado que se acepta una salida como válida.
 MAX_EXCESO_SALIDA_HRS = 3
-# Hora de corte para definir si una SALIDA matutina pertenece al turno del día anterior (ej: 08:00 AM)
+# Hora de corte para definir si una SALIDA en la mañana pertenece al turno del día anterior (ej: 08:00 AM)
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
 # --- CONSTANTES DE TOLERANCIA REVISADAS ---
-# Tolerancia para considerar la llegada como 'tarde' para el cálculo de horas. (Usado en el cálculo de Horas)
+# Tolerancia para considerar la llegada como 'tarde' para el cálculo de horas. 
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
+
 # Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno.
-# Actualizado a 3 horas (180 minutos)
+
 TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 180 
 
-# --- CONSTANTE DE PAGO POR ANTELACIÓN (NUEVA) ---
+# --- HORAS EXTRA LLEGADA TEMPRANO ---
 # Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
-# Si la antelación es > 30 minutos, se paga desde la entrada real. Si es <= 30 minutos, se paga desde el inicio programado.
+# Si la antelación es > 30 minutos, se cuenta desde la entrada real. Si es <= 30 minutos, se cuenta desde el inicio programado.
 UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30 # 30 minutos
 
-# --- CONSTANTE DE LÓGICA DE BORDES (NUEVA) ---
-# Tiempo mínimo aceptable para una jornada que terminó con una SALIDA REAL. 
+# --- EVITAR MICRO-JORNADAS ---
 # Si la duración es menor a este umbral (ej: 1 hora) y se usó una SALIDA REAL, se ignora esa salida
-# y se fuerza la ASSUMPCIÓN al fin de turno programado.
+
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 
-# --- CONSTANTE DE FILTRADO DE HORAS EXTRA (ACTUALIZADA LA NOTA, VALOR CORRECTO) ---
+# ---HORA EXTRA MAS DE 30 MIN ---
 # Umbral en horas para resaltar las Horas Extra (30 minutos / 60 minutos = 0.5)
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
-# --- 3. Obtener turno basado en fecha y hora (REVISIÓN DE DÍA ANTERIOR AÑADIDA) ---
+# --- 3. Obtener turno basado en fecha y hora ---
 
 def buscar_turnos_posibles(fecha_clave: datetime.date):
     """Genera una lista de (nombre_turno, info, inicio_dt, fin_dt, fecha_clave_asignada) para un día."""
@@ -171,7 +171,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     return mejor_turno_data if mejor_turno_data else (None, None, None, None, None)
 
-# --- 4. Calculo de horas (Selección de Min/Max y Priorización de Turno) ---
+# --- 4. Calculo de horas ---
 
 def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_llegada_tarde: int):
     """
@@ -224,7 +224,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 turno_nombre_temp, info_turno_temp, inicio_turno_temp, fin_turno_temp, fecha_clave_final_temp = turno_data
                 
                 if turno_nombre_temp is not None:
-                    # Calcula la diferencia absoluta con el inicio programado (para encontrar el mejor ajuste)
+                    # Calcula la diferencia absoluta con el inicio programado 
                     diferencia = abs(current_entry_time - inicio_turno_temp)
                     
                     if diferencia < menor_diferencia_turno:
@@ -267,7 +267,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                     estado_calculo = "Calculado"
                     salida_fue_real = True
                     
-                # --- REGLA DE ROBUSTEZ ADICIONAL PARA MICRO-MARCACIONES ---
+                # --- PARA MICRO-JORNADAS ---
                 # Si se usó una SALIDA REAL, pero la duración es muy corta (< 1 hora), 
                 # forzamos la ASSUMPCIÓN al fin de turno para evitar el problema de jornadas de 2 minutos.
                 if salida_fue_real:
@@ -293,7 +293,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                     inicio_efectivo_calculo = entrada_real
                     llegada_tarde_flag = True
                     
-                # 2. Regla para ENTRADA TEMPRANA (Cualquier entrada antes del inicio programado) - NUEVA LÓGICA DE PAGO
+                # 2. Regla para ENTRADA TEMPRANA (Cualquier entrada antes del inicio programado)
                 elif entrada_real < inicio_turno:
                     
                     # Calcular el tiempo de antelación
@@ -571,6 +571,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
