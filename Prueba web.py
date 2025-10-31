@@ -93,10 +93,12 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 
 # Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno.
-# SE AUMENTA A 360 MINUTOS (6 HORAS) para asegurar que las entradas muy tempranas
-# no se descarten en la asignación de turno, capturando correctamente entradas a mitad de la mañana
-# para turnos de la tarde.
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 240
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360 
+
+# NUEVA TOLERANCIA: Máxima tardanza permitida para que una entrada CUENTE para la ASIGNACIÓN de un turno.
+# Esto asegura que entradas como 15:06 sigan contando para un turno de 13:40 y no se descarten.
+TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 # 3 horas de margen para la asignación (13:40 + 3h = 16:40)
+
 
 # --- HORAS EXTRA LLEGADA TEMPRANO ---
 # Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
@@ -164,12 +166,13 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Actualizada) ---
-        # 1. El límite más temprano que aceptamos la entrada (6 horas antes = 360 minutos)
+        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Actualizada con doble tolerancia) ---
+        # 1. El límite más temprano que aceptamos la entrada (6 horas antes)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
         
-        # 2. El límite más tardío que aceptamos la entrada (45 minutos después del inicio programado)
-        rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_LLEGADA_TARDE_MINUTOS + 5)
+        # 2. El límite más tardío que aceptamos la entrada (Usando la tolerancia amplia de 180 min)
+        # Esto permite que entradas tardías se asignen al turno correcto en lugar de descartarse.
+        rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS + 5)
         
         # Validar si el evento (la entrada) cae en esta ventana estricta alrededor del INICIO PROGRAMADO.
         if fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
@@ -298,7 +301,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 inicio_efectivo_calculo = inicio_turno
                 llegada_tarde_flag = False
                 
-                # 1. Regla para LLEGADA TARDE (Más de 40 minutos tarde) - Tiene prioridad
+                # 1. Regla para LLEGADA TARDE (Más de 40 minutos tarde) - AÚN USA LA REGLA ESTRICTA DE 40 MIN
                 if entrada_real > inicio_turno + timedelta(minutes=tolerancia_llegada_tarde):
                     # Si llega tarde más la tolerancia (40 min), el cálculo inicia en la entrada real
                     inicio_efectivo_calculo = entrada_real
@@ -597,5 +600,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
+
 
 
