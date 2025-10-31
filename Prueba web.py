@@ -143,9 +143,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     """
     Busca el turno programado más cercano a la marcación de entrada.
     
-    MODIFICACIÓN: PRIORIZA LA ENTRADA MÁS TEMPRANA que cae dentro de la ventana 
-    de aceptación de CUALQUIER turno, asegurando que si hay múltiples entradas 
-    válidas (ej. 11:20 y 20:21), se elija la primera (11:20).
+    PRIORIZA LA ENTRADA MÁS TEMPRANA que cae dentro de la ventana de aceptación de CUALQUIER turno.
 
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
@@ -164,7 +162,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA ---
+        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Mantenida) ---
         # 1. El límite más temprano que aceptamos la entrada (3 horas antes = 180 minutos)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
         
@@ -188,11 +186,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_llegada_tarde: int):
     """
     Agrupa por ID y FECHA_CLAVE_TURNO.
-    Prioriza la ENTRADA que mejor se alinea a un turno programado,
-    usando la lógica robusta que puede reasignar la FECHA_CLAVE_TURNO.
-    
-    Nota: Se usan los nombres de columnas en minúscula que fueron normalizados y renombrados
-    en la función de carga: 'id_trabajador', 'nombre', 'porteria', etc.
+    Busca la ENTRADA MÁS TEMPRANA dentro del grupo de marcaciones que logra 
+    asignar un turno válido a través de 'obtener_turno_para_registro'.
     """
     
     df_filtrado = df[(df['PORTERIA_NORMALIZADA'].isin(lugares_normalizados)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
@@ -224,22 +219,23 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
 
         mejor_entrada_para_turno = pd.NaT
         mejor_turno_data = (None, None, None, None, None)
+        # CORRECCIÓN: Inicializamos la hora más temprana para el grupo de entradas
         mejor_hora_entrada_global = datetime.max 
 
-        # --- REVISIÓN CLAVE 1: Encontrar la mejor entrada que se alinee a un turno ---
+        # --- REVISIÓN CLAVE 1: Encontrar la mejor entrada (la más temprana) que se alinee a un turno ---
         if not entradas.empty:
             for index, row in entradas.iterrows():
                 current_entry_time = row['FECHA_HORA']
                 
-                # Intentar asignar un turno a esta marcación de entrada, permitiendo reasignación de fecha clave
+                # Intentar asignar un turno a esta marcación de entrada
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 turno_nombre_temp, info_turno_temp, inicio_turno_temp, fin_turno_temp, fecha_clave_final_temp = turno_data
                 
                 if turno_nombre_temp is not None:
                     
-                    # Si esta entrada es más temprana que la mejor entrada encontrada globalmente para el grupo, la actualizamos
-                    # (Esto garantiza que la lógica de priorización se respete a través de todas las entradas del grupo)
+                    # CORRECCIÓN CLAVE: Si la entrada actual asignó un turno Y es más temprana que la mejor entrada registrada:
                     if current_entry_time < mejor_hora_entrada_global:
+                        # Guardar esta entrada y su turno asociado
                         mejor_hora_entrada_global = current_entry_time
                         mejor_entrada_para_turno = current_entry_time
                         mejor_turno_data = turno_data
@@ -604,7 +600,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
 
 
