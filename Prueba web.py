@@ -93,8 +93,8 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 
 # Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno.
-
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 180 
+# SE AUMENTA A 240 MINUTOS (4 HORAS) para capturar entradas muy tempranas que se estaban descartando.
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 240 
 
 # --- HORAS EXTRA LLEGADA TEMPRANO ---
 # Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
@@ -163,7 +163,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
         # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Mantenida) ---
-        # 1. El límite más temprano que aceptamos la entrada (3 horas antes = 180 minutos)
+        # 1. El límite más temprano que aceptamos la entrada (4 horas antes = 240 minutos)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
         
         # 2. El límite más tardío que aceptamos la entrada (45 minutos después del inicio programado)
@@ -290,7 +290,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 # --- 3. REGLAS DE CÁLCULO DE HORAS ---
 
                 # La duración total es el tiempo entre la entrada real y la salida (real o asumida)
-                duracion_total = salida_real - entrada_real
+                # duracion_total = salida_real - entrada_real # Solo se usa para el check de micro-jornada
                 
                 # Regla de cálculo por defecto: inicia en el turno programado
                 inicio_efectivo_calculo = inicio_turno
@@ -331,29 +331,24 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                     
                     horas_turno = info_turno["duracion_hrs"]
                     
-                    # Para jornadas asumidas, aún se aplica el cálculo de horas extra si la duración supera el turno.
-                    # Mantenemos esta regla para jornadas que no fueron ni Calculadas (por micro-jornada) ni Asumidas.
-                    if duracion_total < timedelta(hours=4) and estado_calculo == "Jornada Corta (< 4h de Ent-Sal)":
-                        # Solo se aplica si el estado no fue modificado por la detección de micro-jornada
-                        horas_extra = 0.0
-                    else:
+                    # Cálculo de Horas Extra
+                    if estado_calculo == "Calculado" and salida_fue_real:
+                        # Si es una jornada real y no es micro-jornada
                         horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
-                        if estado_calculo == "Calculado" and not salida_fue_real:
-                            # Si se forzó la asunción por micro-jornada, el estado ya está bien.
-                            pass
-                        elif estado_calculo == "Calculado":
-                            # Mantener "Calculado" si se usaron entradas/salidas reales.
-                            estado_calculo = "Calculado" 
-                        elif estado_calculo == "ASUMIDO (Micro-jornada detectada)":
-                            # Si se forzó la asunción por micro-jornada, usar este estado
-                            pass
+                        estado_calculo = "Calculado"
+                    elif estado_calculo.startswith("ASUMIDO"):
+                        # Si es una jornada asumida (por falta de salida o micro-jornada)
+                        # Las horas extra se calculan sobre la duración efectiva (hasta fin_turno)
+                        horas_extra = max(0, round(horas_trabajadas - horas_turno, 2)) 
+                    else:
+                         # Caso de error o jornadas incompletas que no tienen un estado claro
+                        horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
 
             else:
                 estado_calculo = "Turno No Asignado (Entradas existen, pero ninguna se alinea con un turno programado)"
 
         elif pd.isna(entrada_real) and not grupo[grupo['TIPO_MARCACION'] == 'sal'].empty:
             # Caso de "Primer día" donde solo hay una salida de madrugada (FECHA_CLAVE_TURNO = Día anterior).
-            # Esta es la jornada que el usuario quiere omitir, ya que no hay datos de entrada previos.
             # Se omite para limpiar el reporte.
             continue
             
@@ -393,7 +388,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
 
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
-st.write("Sube tu archivo de Excel para calcular las horas extra del personal. El sistema ahora **prioriza la Entrada más temprana** que se alinee a un turno programado.")
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal. El sistema ahora **prioriza la Entrada más temprana** que se alinee a un turno programado, con una **tolerancia de 4 horas** antes del inicio.")
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -551,7 +546,7 @@ if archivo_excel is not None:
 
                     # PASO 1: Determinar el formato base de la fila (Baja prioridad)
                     base_format = None
-                    if is_missing_entry or (not is_calculated and not is_assumed):
+                    if is_missing_entry and not is_assumed:
                         base_format = gray_format
                     elif is_assumed:
                         # Formato ASUMIDO (Amarillo claro)
@@ -567,7 +562,7 @@ if archivo_excel is not None:
                         if col_name == 'ENTRADA_REAL' and is_late:
                             cell_format = orange_format
                         
-                        # Override B: Horas Extra > 30 minutos (Rojo Fuerte) - SATISFACE SOLICITUD DEL USUARIO
+                        # Override B: Horas Extra > 30 minutos (Rojo Fuerte)
                         if is_excessive_extra and col_name in ['Horas_Extra', 'Horas', 'Minutos']:
                             cell_format = red_extra_format
 
@@ -600,4 +595,3 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
