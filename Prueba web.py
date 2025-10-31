@@ -93,8 +93,10 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 
 # Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno.
-# SE AUMENTA A 240 MINUTOS (4 HORAS) para capturar entradas muy tempranas que se estaban descartando.
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 240 
+# SE AUMENTA A 360 MINUTOS (6 HORAS) para asegurar que las entradas muy tempranas
+# no se descarten en la asignación de turno, capturando correctamente entradas a mitad de la mañana
+# para turnos de la tarde.
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360 
 
 # --- HORAS EXTRA LLEGADA TEMPRANO ---
 # Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
@@ -162,8 +164,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Mantenida) ---
-        # 1. El límite más temprano que aceptamos la entrada (4 horas antes = 240 minutos)
+        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Actualizada) ---
+        # 1. El límite más temprano que aceptamos la entrada (6 horas antes = 360 minutos)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
         
         # 2. El límite más tardío que aceptamos la entrada (45 minutos después del inicio programado)
@@ -219,7 +221,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
 
         mejor_entrada_para_turno = pd.NaT
         mejor_turno_data = (None, None, None, None, None)
-        # CORRECCIÓN: Inicializamos la hora más temprana para el grupo de entradas
+        # Inicializamos la hora más temprana para el grupo de entradas
         mejor_hora_entrada_global = datetime.max 
 
         # --- REVISIÓN CLAVE 1: Encontrar la mejor entrada (la más temprana) que se alinee a un turno ---
@@ -233,7 +235,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
                 
                 if turno_nombre_temp is not None:
                     
-                    # CORRECCIÓN CLAVE: Si la entrada actual asignó un turno Y es más temprana que la mejor entrada registrada:
+                    # Si la entrada actual asignó un turno Y es más temprana que la mejor entrada registrada:
                     if current_entry_time < mejor_hora_entrada_global:
                         # Guardar esta entrada y su turno asociado
                         mejor_hora_entrada_global = current_entry_time
@@ -388,7 +390,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_normalizados: list, tolerancia_lle
 
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
-st.write("Sube tu archivo de Excel para calcular las horas extra del personal. El sistema ahora **prioriza la Entrada más temprana** que se alinee a un turno programado, con una **tolerancia de 4 horas** antes del inicio.")
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal. El sistema ahora **prioriza la Entrada más temprana** que se alinee a un turno programado, con una **tolerancia de 6 horas** antes del inicio.")
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -595,3 +597,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
