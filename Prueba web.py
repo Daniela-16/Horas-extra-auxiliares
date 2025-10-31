@@ -19,7 +19,8 @@ CODIGOS_TRABAJADORES_FILTRO = [
     71337381, 82631, 82725, 83309, 81947, 82385, 80765, 82642, 1128268115, 
     80526, 82979, 81240, 81873, 83320, 82617, 82243, 81948, 82954
 ]
-# Se asegura que la lista de códigos sea de tipo entero para la comparación.
+
+#Se asegura que la lista de códigos sea de tipo entero para la comparación.
 
 # --- 1. Definición de los Turnos ---
 
@@ -607,4 +608,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
