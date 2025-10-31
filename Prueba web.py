@@ -96,7 +96,7 @@ TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 # SE AUMENTA A 360 MINUTOS (6 HORAS) para asegurar que las entradas muy tempranas
 # no se descarten en la asignación de turno, capturando correctamente entradas a mitad de la mañana
 # para turnos de la tarde.
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360 
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 240
 
 # --- HORAS EXTRA LLEGADA TEMPRANO ---
 # Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
@@ -597,4 +597,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
