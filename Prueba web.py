@@ -19,7 +19,6 @@ CODIGOS_TRABAJADORES_FILTRO = [
     71337381, 82631, 82725, 83309, 81947, 82385, 80765, 82642, 1128268115,
     80526, 82979, 81240, 81873, 83320, 82617, 82243, 81948, 82954
 ]
-# Se asegura que la lista de códigos sea de tipo entero para la comparación.
 
 # --- 1. Definición de los Turnos ---
 
@@ -43,7 +42,7 @@ TURNOS = {
     }
 }
 
-# --- 2. Configuración General ---
+# --- 2. Configuración General (Puestos de Trabajo y Porterías separadas y ordenadas) ---
 
 # Lista de Puestos de Trabajo (Lugares con marcaciones de jornada) - Ordenado alfabéticamente
 PUESTOS_TRABAJO = sorted([
@@ -74,19 +73,16 @@ PORTERIAS = sorted([
     "NOEL_MDE_VEHICULAR_PORT_1_ENT", "NOEL_MDE_VEHICULAR_PORT_1_SAL"
 ])
 
-# Se mantienen las variables normalizadas para el filtrado
+# Variables normalizadas
 LUGARES_TRABAJO_PRINCIPAL = PUESTOS_TRABAJO + PORTERIAS
 LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS = [lugar.strip().lower() for lugar in LUGARES_TRABAJO_PRINCIPAL]
 PUESTOS_TRABAJO_NORMALIZADOS = [lugar.strip().lower() for lugar in PUESTOS_TRABAJO]
 PORTERIAS_NORMALIZADAS = [lugar.strip().lower() for lugar in PORTERIAS]
 
 
-# Máximo de horas después del fin de turno programado que se acepta una salida como válida.
+# Constantes
 MAX_EXCESO_SALIDA_HRS = 3
-# Hora de corte para definir si una SALIDA en la mañana pertenece al turno del día anterior (ej: 08:00 AM)
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
-
-# --- CONSTANTES DE TOLERANCIA REVISADAS ---
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360 
 TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 
@@ -94,7 +90,7 @@ UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
-# --- 3. Obtener turno basado en fecha y hora (SIN CAMBIOS) ---
+# --- 3. Obtener turno basado en fecha y hora ---
 
 def buscar_turnos_posibles(fecha_clave: datetime.date):
     """Genera una lista de (nombre_turno, info, inicio_dt, fin_dt, fecha_clave_asignada) para un día."""
@@ -171,7 +167,7 @@ def pre_filtrar_por_lugar(df: pd.DataFrame, puestos_trabajo_normalizados: list, 
     return df_porterias
 
 
-# --- 4. Calculo de horas (SIN CAMBIOS) ---
+# --- 4. Calculo de horas ---
 
 def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, tolerancia_llegada_tarde: int):
     """
@@ -293,7 +289,8 @@ def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, toler
         # Añade los resultados a la lista
         ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
         sal_str = salida_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(salida_real) else 'N/A'
-        report_date = fecha_clave_final if fecha_clave_final else fecha_clave_turno
+        # report_date ya es un datetime.date, no necesita .date()
+        report_date = fecha_clave_final if fecha_clave_final else fecha_clave_turno 
         inicio_str = inicio_turno.strftime("%H:%M:%S") if inicio_turno else 'N/A'
         fin_str = fin_turno.strftime("%H:%M:%S") if fin_turno else 'N/A'
         horas_turno_val = info_turno["duracion_hrs"] if info_turno else 0
@@ -321,7 +318,9 @@ def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, toler
 
     return pd.DataFrame(resultados)
 
-# --- 5. Interfaz Streamlit (ACTUALIZADA: Lógica de Fechas Dinámica) ---
+# ----------------------------------------------------------------------
+# --- 5. Interfaz Streamlit (Lógica de Fechas Dinámica y Corregida) ---
+# ----------------------------------------------------------------------
 
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
@@ -331,7 +330,7 @@ archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
 if archivo_excel is not None:
     try:
-        # Intenta leer la hoja específica 
+        # Carga del DataFrame
         df_raw = pd.read_excel(archivo_excel, sheet_name='data')
 
         columnas_requeridas_lower = [
@@ -353,7 +352,6 @@ if archivo_excel is not None:
         try:
             df_raw['id_trabajador'] = pd.to_numeric(df_raw['id_trabajador'], errors='coerce').astype('Int64')
         except:
-            st.warning("No se pudo convertir 'id_trabajador' a entero de forma segura. Se intentará con string.")
             df_raw['id_trabajador'] = df_raw['id_trabajador'].astype(str)
             codigos_filtro = [str(c) for c in CODIGOS_TRABAJADORES_FILTRO]
         else:
@@ -365,7 +363,7 @@ if archivo_excel is not None:
             st.error("⚠️ ERROR: Después del filtrado por código de trabajador, no quedan registros para procesar. Verifica que los códigos sean correctos.")
             st.stop()
         
-        # Preprocesamiento inicial de columnas (usando 'fecha')
+        # Preprocesamiento inicial de columnas
         df_raw['fecha'] = pd.to_datetime(df_raw['fecha'], errors='coerce')  
         df_raw.dropna(subset=['fecha'], inplace=True)
             
@@ -401,7 +399,7 @@ if archivo_excel is not None:
             fecha_min_reporte = df_raw['FECHA_HORA'].min().normalize().date()
             fecha_max_reporte = df_raw['FECHA_HORA'].max().normalize().date()
             
-            # 2. Rango de fechas EXPANDIDO (para incluir marcaciones incompletas del día anterior y posterior)
+            # 2. Rango de fechas EXPANDIDO (para incluir marcaciones incompletas)
             fecha_inicio_expandida = datetime.combine(fecha_min_reporte, datetime.min.time()) - timedelta(days=1)
             fecha_fin_expandida = datetime.combine(fecha_max_reporte, datetime.max.time()) + timedelta(days=1)
             
@@ -433,9 +431,7 @@ if archivo_excel is not None:
             if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
                 fecha_clave = fecha_original - timedelta(days=1)
             
-            # RESTRICCIÓN DINÁMICA: Si la fecha CLAVE del turno es posterior al rango de reporte,
-            # (Ej. una entrada el día 4 que generaría FECHA_CLAVE = 4, cuando el reporte termina el 3)
-            # entonces se ignora esa marcación para crear un nuevo turno.
+            # RESTRICCIÓN DINÁMICA: Si la fecha CLAVE del turno es posterior al rango de reporte, se ignora.
             if fecha_clave > fecha_max_reporte_limite:
                  return None 
 
@@ -446,9 +442,11 @@ if archivo_excel is not None:
             lambda row: asignar_fecha_clave_turno_corregida(row, fecha_max_reporte), axis=1
         )
         
-        # Eliminamos las filas cuya FECHA_CLAVE_TURNO es None (estas son las entradas del día +1)
+        # CORRECCIÓN DEL ERROR 'datetime.date' object has no attribute 'date'
+        # Eliminamos las filas cuya FECHA_CLAVE_TURNO es None
         df_raw.dropna(subset=['FECHA_CLAVE_TURNO'], inplace=True)
-        df_raw['FECHA_CLAVE_TURNO'] = df_raw['FECHA_CLAVE_TURNO'].apply(lambda x: x.date() if pd.notna(x) else None)
+        # Se asegura el tipo sin llamar .date() a un objeto que ya es date.
+        df_raw['FECHA_CLAVE_TURNO'] = df_raw['FECHA_CLAVE_TURNO'].apply(lambda x: x if pd.notna(x) else None)
 
 
         # --- Ejecutar el Pre-Filtrado para la Priorización ---
@@ -458,8 +456,7 @@ if archivo_excel is not None:
         df_resultado = calcular_turnos(df_raw.copy(), df_marcaciones_filtrado, TOLERANCIA_LLEGADA_TARDE_MINUTOS)
 
         if not df_resultado.empty:
-            # --- FILTRADO FINAL DE RESULTADOS: Mantenemos solo las FECHAS CLAVE del rango original ---
-            # Esto asegura que el reporte final solo contenga las fechas que el usuario cargó originalmente.
+            # FILTRADO FINAL DE RESULTADOS: Mantenemos solo las FECHAS CLAVE del rango original
             df_resultado = df_resultado[
                 (df_resultado['FECHA'] >= fecha_min_reporte) &
                 (df_resultado['FECHA'] <= fecha_max_reporte)
@@ -469,7 +466,7 @@ if archivo_excel is not None:
                 st.warning("No se encontraron jornadas válidas dentro del rango de reporte original después de la limpieza.")
                 st.stop()
             
-            # Post-procesamiento para el reporte (SIN CAMBIOS)
+            # Post-procesamiento para el reporte
             df_resultado['Estado_Llegada'] = df_resultado['Llegada_Tarde_Mas_40_Min'].map({True: 'Tarde', False: 'A tiempo'})
             df_resultado.sort_values(by=['NOMBRE', 'FECHA', 'ENTRADA_REAL'], inplace=True) 
             
@@ -484,7 +481,7 @@ if archivo_excel is not None:
             st.subheader("Resultados de las Horas Extra")
             st.dataframe(df_resultado[columnas_reporte], use_container_width=True)
 
-            # --- Lógica de descarga en Excel con formato condicional (SIN CAMBIOS) ---
+            # --- Lógica de descarga en Excel con formato condicional ---
             buffer_excel = io.BytesIO()
             with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
                 df_to_excel = df_resultado[columnas_reporte].copy()
@@ -549,3 +546,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
