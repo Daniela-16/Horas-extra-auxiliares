@@ -337,8 +337,13 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         else:
             estado_calculo = "Turno No Asignado (Ninguna marcación se alinea con un turno programado)"
 
-        # Evitar añadir registros que son salidas de turno nocturno sin entrada del día reportado
-        elif pd.isna(entrada_real) and not grupo[grupo['TIPO_MARCACION'] == 'sal'].empty:
+        # CORRECCIÓN DE SYNTAX ERROR: Se reemplaza 'elif' por 'if' para evitar el error de sintaxis 
+        # que ocurre cuando un 'elif' sigue a un 'else' en el mismo bloque de indentación.
+        if pd.isna(entrada_real) and not grupo[grupo['TIPO_MARCACION'] == 'sal'].empty:
+            # Caso de "Primer día" donde solo hay una salida de madrugada (FECHA_CLAVE_TURNO = Día anterior).
+            # Si NO se pudo asignar una ENTRADA (entrada_real es NaT), pero SÍ hay marcaciones de SALIDA en el grupo,
+            # lo más probable es que sea una salida de turno nocturno del día anterior cuyo inicio no está en el reporte.
+            # Se omite para limpiar el reporte.
             continue
             
         # --- Añade los resultados a la lista (Se reporta todo) ---
@@ -686,6 +691,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
