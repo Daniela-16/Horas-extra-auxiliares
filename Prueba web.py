@@ -690,7 +690,7 @@ if archivo_excel is not None:
         st.error(f"Error crítico al procesar el archivo: {e}. Por favor, verifica el formato de los datos.")
 
 st.markdown("---")
-st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos 
+st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
 
 
 
