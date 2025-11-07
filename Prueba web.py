@@ -91,7 +91,7 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 
 # Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno.
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 180 
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 150 
 
 # NUEVA TOLERANCIA: Máxima tardanza permitida para que una entrada CUENTE para la ASIGNACIÓN de un turno.
 # Esto asegura que entradas como 15:06 sigan contando para un turno de 13:40 y no se descarten.
@@ -623,3 +623,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
