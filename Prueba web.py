@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 Calculadora de Horas Extra.
@@ -84,9 +85,9 @@ PORTERIAS_NORMALIZADAS = [lugar.strip().lower() for lugar in PORTERIAS]
 MAX_EXCESO_SALIDA_HRS = 3
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360 
-TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 
-UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30 
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360  # 6 horas (para turnos nocturnos)
+TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180  
+UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30  
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
@@ -121,8 +122,7 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date):
     """
     Busca el turno programado más cercano a la marcación de entrada.
-    PRIORIZA LA ENTRADA MÁS TEMPRANA.
-    Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
+    Añade una restricción de 4 horas para turnos diurnos (SOLUCIÓN al Error 2).
     """
     mejor_turno_data = None
     mejor_hora_entrada = datetime.max 
@@ -136,54 +136,60 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
+        es_nocturno = info_turno.get("nocturno", False)
+
+        # RESTRICCIÓN CLAVE: Máxima antelación permitida
+        if not es_nocturno:
+            # Para turnos diurnos: máx. 4 horas antes (240 min).
+            max_antelacion_minutos = 240 
+        else:
+            # Para turnos nocturnos, mantenemos la tolerancia amplia de 6 horas (360 min)
+            max_antelacion_minutos = TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS
+
+        # 1. El límite más temprano que aceptamos la entrada
+        rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=max_antelacion_minutos)
+        
+        # 2. El límite más tardío que aceptamos la entrada (3 horas tarde)
         rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS + 5)
         
         if fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
+            
             current_entry_time = fecha_hora_evento
-
             if mejor_turno_data is None or current_entry_time < mejor_hora_entrada:
                 mejor_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
                 mejor_hora_entrada = current_entry_time 
 
     return mejor_turno_data if mejor_turno_data else (None, None, None, None, None)
 
-# --- NUEVA FUNCIÓN DE FILTRADO (PRIORIZACIÓN: Puestos de Trabajo sobre Porterías) ---
-def pre_filtrar_por_lugar(df: pd.DataFrame, puestos_trabajo_normalizados: list, porterias_normalizadas: list):
+# --- FUNCIÓN DE FILTRADO (Ahora solo filtra por todos los lugares válidos) ---
+def pre_filtrar_por_lugar(df: pd.DataFrame, lugares_normalizados: list):
     """
-    Intenta filtrar las marcaciones usando solo los Puestos de Trabajo.
-    Si el DataFrame resultante está vacío, utiliza la lista de Porterías como fallback.
+    Filtra todas las marcaciones que provienen de cualquier lugar válido (Puestos o Porterías).
+    La lógica de prioridad para la ENTRADA se mueve dentro de calcular_turnos.
     """
-    # 1. Intentar con Puestos de Trabajo
-    df_puestos = df[(df['PORTERIA_NORMALIZADA'].isin(puestos_trabajo_normalizados)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
-
-    if not df_puestos.empty:
-        st.info("🎯 **Priorización:** Se encontraron marcaciones válidas en los **Puestos de Trabajo**. Se utilizarán estos registros.")
-        return df_puestos
-    
-    # 2. Fallback a Porterías si no hay registros válidos en Puestos de Trabajo
-    st.warning("⚠️ **Fallback:** No se encontraron marcaciones válidas en Puestos de Trabajo. Se utilizarán los registros de **Porterías**.")
-    df_porterias = df[(df['PORTERIA_NORMALIZADA'].isin(porterias_normalizadas)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
-    return df_porterias
+    df_filtrado = df[(df['PORTERIA_NORMALIZADA'].isin(lugares_normalizados)) & (df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
+    return df_filtrado
 
 
-# --- 4. Calculo de horas ---
+# --- 4. Calculo de horas (REESTRUCTURADO PARA LA PRIORIDAD DE ENTRADA) ---
 
-def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, tolerancia_llegada_tarde: int):
+def calcular_turnos(df: pd.DataFrame, df_marcaciones_validas: pd.DataFrame, tolerancia_llegada_tarde: int):
     """
     Agrupa por ID y FECHA_CLAVE_TURNO para calcular horas.
+    Implementa la prioridad de Puestos de Trabajo para la SELECCIÓN de la Entrada.
     """
-    df_filtrado = df_filtrado_por_lugar.copy()
+    df_filtrado = df_marcaciones_validas.copy()
     df_filtrado.sort_values(by=['id_trabajador', 'FECHA_HORA'], inplace=True)
 
     if df_filtrado.empty: return pd.DataFrame()
 
     resultados = []
 
+    # Agrupar por trabajador y fecha clave
     for (id_trabajador, fecha_clave_turno), grupo in df_filtrado.groupby(['id_trabajador', 'FECHA_CLAVE_TURNO']):
         
         nombre = grupo['nombre'].iloc[0]
-        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent']
+        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'] # Todas las entradas del grupo (Puestos + Porterías)
         
         entrada_real = pd.NaT
         porteria_entrada = 'N/A'
@@ -200,14 +206,21 @@ def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, toler
         mejor_turno_data = (None, None, None, None, None)
         mejor_hora_entrada_global = datetime.max 
 
+        # --- LÓGICA DE PRIORIZACIÓN DE ENTRADA ---
+        
+        entradas_puestos = entradas[entradas['PORTERIA_NORMALIZADA'].isin(PUESTOS_TRABAJO_NORMALIZADOS)]
+        
+        # Definir el grupo de entradas a iterar (Prioridad: Puestos, Fallback: Todas)
+        entradas_a_iterar = entradas_puestos if not entradas_puestos.empty else entradas
+            
         # 1. Encontrar la mejor entrada
-        if not entradas.empty:
-            for index, row in entradas.iterrows():
+        if not entradas_a_iterar.empty:
+            for index, row in entradas_a_iterar.iterrows():
                 current_entry_time = row['FECHA_HORA']
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
-                turno_nombre_temp, info_turno_temp, inicio_turno_temp, fin_turno_temp, fecha_clave_final_temp = turno_data
                 
-                if turno_nombre_temp is not None:
+                if turno_data[0] is not None: # Si se pudo asignar un turno
+                    # Siempre seleccionamos la entrada más temprana que asignó un turno
                     if current_entry_time < mejor_hora_entrada_global:
                         mejor_hora_entrada_global = current_entry_time
                         mejor_entrada_para_turno = current_entry_time
@@ -216,16 +229,17 @@ def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, toler
             if pd.notna(mejor_entrada_para_turno):
                 entrada_real = mejor_entrada_para_turno
                 turno_nombre, info_turno, inicio_turno, fin_turno, fecha_clave_final = mejor_turno_data
-                porteria_entrada = entradas[entradas['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
                 
-                # 2. Filtro y/o Inferencia de Salida
+                # Obtener la portería de la entrada seleccionada (de la lista original del grupo)
+                porteria_entrada = grupo[grupo['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
+                
+                # 2. Filtro y/o Inferencia de Salida: Usamos TODAS las marcaciones del 'grupo'
                 max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
                 
-                valid_salidas = df_filtrado[
-                    (df_filtrado['id_trabajador'] == id_trabajador) &
-                    (df_filtrado['TIPO_MARCACION'] == 'sal') &
-                    (df_filtrado['FECHA_HORA'] > entrada_real) &
-                    (df_filtrado['FECHA_HORA'] <= max_salida_aceptable)
+                valid_salidas = grupo[
+                    (grupo['TIPO_MARCACION'] == 'sal') &
+                    (grupo['FECHA_HORA'] > entrada_real) &
+                    (grupo['FECHA_HORA'] <= max_salida_aceptable)
                 ]
                 
                 if valid_salidas.empty:
@@ -234,6 +248,7 @@ def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, toler
                     estado_calculo = "ASUMIDO (Falta Salida/Salida Inválida)"
                     salida_fue_real = False
                 else:
+                    # Usamos la última salida válida, que ahora incluye Porterías y Puestos
                     salida_real = valid_salidas['FECHA_HORA'].max()
                     porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['porteria'].iloc[0]
                     estado_calculo = "Calculado"
@@ -289,7 +304,6 @@ def calcular_turnos(df: pd.DataFrame, df_filtrado_por_lugar: pd.DataFrame, toler
         # Añade los resultados a la lista
         ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
         sal_str = salida_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(salida_real) else 'N/A'
-        # report_date ya es un datetime.date, no necesita .date()
         report_date = fecha_clave_final if fecha_clave_final else fecha_clave_turno 
         inicio_str = inicio_turno.strftime("%H:%M:%S") if inicio_turno else 'N/A'
         fin_str = fin_turno.strftime("%H:%M:%S") if fin_turno else 'N/A'
@@ -442,17 +456,17 @@ if archivo_excel is not None:
             lambda row: asignar_fecha_clave_turno_corregida(row, fecha_max_reporte), axis=1
         )
         
-        # CORRECCIÓN DEL ERROR 'datetime.date' object has no attribute 'date'
-        # Eliminamos las filas cuya FECHA_CLAVE_TURNO es None
+        # Eliminar filas cuya FECHA_CLAVE_TURNO es None
         df_raw.dropna(subset=['FECHA_CLAVE_TURNO'], inplace=True)
-        # Se asegura el tipo sin llamar .date() a un objeto que ya es date.
+        # Se asegura el tipo (Corregido el error de tipo)
         df_raw['FECHA_CLAVE_TURNO'] = df_raw['FECHA_CLAVE_TURNO'].apply(lambda x: x if pd.notna(x) else None)
 
-
-        # --- Ejecutar el Pre-Filtrado para la Priorización ---
-        df_marcaciones_filtrado = pre_filtrar_por_lugar(df_raw.copy(), PUESTOS_TRABAJO_NORMALIZADOS, PORTERIAS_NORMALIZADAS)
+        # --- Ejecutar el Pre-Filtrado para todas las marcaciones válidas ---
+        # Se pasan TODOS los lugares válidos para no perder salidas de portería.
+        df_marcaciones_filtrado = pre_filtrar_por_lugar(df_raw.copy(), LUGARES_TRABAJO_PRINCIPAL_NORMALIZADOS)
         
         # --- Ejecutar el Cálculo ---
+        # La lógica de prioridad de entrada se implementa dentro de calcular_turnos
         df_resultado = calcular_turnos(df_raw.copy(), df_marcaciones_filtrado, TOLERANCIA_LLEGADA_TARDE_MINUTOS)
 
         if not df_resultado.empty:
@@ -546,4 +560,3 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
