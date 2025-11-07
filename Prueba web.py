@@ -404,8 +404,8 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
     df_filtrado = df_resultado.copy()
     rows_to_keep_indices = []
     
-    # Convertir la columna FECHA a tipo date para comparaciones de días
-    df_filtrado['FECHA_DATE'] = df_filtrado['FECHA'].apply(lambda x: x.date())
+    # CORRECCIÓN: La columna FECHA ya es datetime.date, por lo que no necesita .date()
+    df_filtrado['FECHA_DATE'] = df_filtrado['FECHA']
 
     # 1. Iterar por cada trabajador para aplicar la lógica individualmente
     for id_trabajador, df_worker_group in df_filtrado.groupby('ID_TRABAJADOR'):
