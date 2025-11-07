@@ -9,6 +9,17 @@ import streamlit as st
 import io
 import numpy as np
 
+# --- CÓDIGOS DE TRABAJADORES PERMITIDOS ---
+# Se filtra el DataFrame de entrada para incluir SOLAMENTE los registros con estos ID.
+CODIGOS_TRABAJADORES_FILTRO = [
+    81169, 82911, 81515, 81744, 82728, 83617, 81594, 81215, 79114, 80531,
+    71329, 82383, 79143, 80796, 80795, 79830, 80584, 81131, 79110, 80530,
+    82236, 82645, 80532, 71332, 82441, 79030, 81020, 82724, 82406, 81953,
+    81164, 81024, 81328, 81957, 80577, 14042, 82803, 80233, 83521, 82226,
+    71337381, 82631, 82725, 83309, 81947, 82385, 80765, 82642, 1128268115,
+    80526, 82979, 81240, 81873, 83320, 82617, 82243, 81948, 82954
+]
+
 # --- 1. Definición de los Turnos ---
 
 TURNOS = {
@@ -83,8 +94,11 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 # Tolerancia para considerar la llegada como 'tarde' para el cálculo de horas.
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
 
-# Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno.
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 180
+# Tolerancia MÁXIMA para considerar la llegada como 'temprana' para la asignación de turno (6 horas)
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360
+
+# Máxima tardanza permitida para que una entrada CUENTE para la ASIGNACIÓN de un turno (3 horas)
+TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180
 
 # --- HORAS EXTRA LLEGADA TEMPRANO ---
 # Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
@@ -133,8 +147,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     verificando los turnos que inician en la FECHA_CLAVE_TURNO y,
     si es temprano en la mañana, también los nocturnos del día anterior.
 
-    NOTA CLAVE: Este chequeo solo acepta entradas dentro de una ventana de 3 horas antes
-    y 45 minutos después del inicio programado, forzando un emparejamiento con el inicio del turno.
+    Utiliza las tolerancias actualizadas (TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS y TOLERANCIA_ASIGNACION_TARDE_MINUTOS)
+    para definir la ventana de asignación de turno.
 
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
@@ -153,11 +167,11 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
         # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA ---
-        # 1. El límite más temprano que aceptamos la entrada (3 horas antes = 180 minutos)
+        # 1. El límite más temprano que aceptamos la entrada (TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
 
-        # 2. El límite más tardío que aceptamos la entrada (45 minutos después del inicio programado: 40 + 5 min buffer)
-        rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_LLEGADA_TARDE_MINUTOS + 5)
+        # 2. El límite más tardío que aceptamos la entrada (TOLERANCIA_ASIGNACION_TARDE_MINUTOS)
+        rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS)
 
         # Validar si el evento (la entrada) cae en esta ventana estricta alrededor del INICIO PROGRAMADO.
         if fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
@@ -228,6 +242,7 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
         nombre = grupo_trabajador['nombre'].iloc[0]
 
         # 1. IDENTIFICAR RANGO ACTIVO DE JORNADAS (FECHA_CLAVE_TURNO con al menos una ENTRADA)
+        # Usamos el tipo object/string de id_trabajador que viene del pre-filtro
         fechas_con_entrada = grupo_trabajador[grupo_trabajador['TIPO_MARCACION'] == 'ent']['FECHA_CLAVE_TURNO'].unique()
 
         if fechas_con_entrada.size == 0:
@@ -322,7 +337,6 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
 
                 # --- 6. REGLAS DE CÁLCULO DE HORAS ---
 
-                duracion_total = salida_real - entrada_real
                 inicio_efectivo_calculo = inicio_turno
                 llegada_tarde_flag = False
 
@@ -356,7 +370,7 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
                     else:
                         estado_calculo = "Calculado"
 
-            # --- FILTROS POST-CÁLCULO PARA INCONSISTENCIAS Y LÍMITES (NUEVA LÓGICA) ---
+            # --- FILTROS POST-CÁLCULO PARA INCONSISTENCIAS Y LÍMITES (LÓGICA DE VACÍOS) ---
 
             is_boundary_date = (fecha_clave_turno == min_fecha_activa) or (fecha_clave_turno == max_fecha_activa)
 
@@ -405,16 +419,14 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
 
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
-st.write("Sube tu archivo de Excel para calcular las horas extra. El sistema prioriza las marcaciones en **Puestos de Trabajo** y usa **Porterías** solo como alternativa. **Las jornadas incompletas en los días de inicio y fin del reporte (turnos nocturnos) son automáticamente descartadas para evitar cálculos asumidos incorrectos.**")
+st.write("Sube tu archivo de Excel para calcular las horas extra. El sistema ahora **filtra por los IDs de trabajador permitidos**, prioriza las marcaciones en **Puestos de Trabajo** y descarta jornadas incompletas en los límites del reporte.")
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
 if archivo_excel is not None:
     try:
-        # Intenta leer la hoja específica
-        # Nota: He quitado la restricción del sheet_name='data' para mantener la compatibilidad con el código original,
-        # pero es una buena práctica solicitar el nombre de la hoja si no es la primera.
-        df_raw = pd.read_excel(archivo_excel) # Lee la primera hoja si no se especifica
+        # Lee la primera hoja si no se especifica
+        df_raw = pd.read_excel(archivo_excel)
 
         # 1. Definir la lista de nombres de columna que esperamos DESPUÉS de convertirlos a minúsculas
         columnas_requeridas_lower = [
@@ -434,6 +446,22 @@ if archivo_excel is not None:
         df_raw = df_raw[columnas_requeridas_lower].copy()
         df_raw.rename(columns={'codtrabajador': 'id_trabajador'}, inplace=True)
 
+        # --- FILTRADO POR CÓDIGO DE TRABAJADOR (Refactorizado para máxima robustez) ---
+        
+        # 1. Preparar el filtro como strings para robustez (cubre IDs numéricos grandes y pequeños)
+        codigos_filtro_str = [str(c) for c in CODIGOS_TRABAJADORES_FILTRO]
+        
+        # 2. Asegurar que la columna del DataFrame también sea string, eliminando espacios
+        df_raw['id_trabajador'] = df_raw['id_trabajador'].astype(str).str.strip()
+
+        # 3. Aplicar el filtro
+        df_raw = df_raw[df_raw['id_trabajador'].isin(codigos_filtro_str)].copy()
+        
+        if df_raw.empty:
+            st.error("⚠️ ERROR: Después del filtrado por código de trabajador, no quedan registros para procesar. Verifica que los códigos en el archivo coincidan con la lista permitida.")
+            st.stop()
+        # --- FIN DEL FILTRADO ---
+        
         # Preprocesamiento inicial de columnas (usando 'fecha')
         df_raw['fecha'] = pd.to_datetime(df_raw['fecha'], errors='coerce')
         df_raw.dropna(subset=['fecha'], inplace=True)
@@ -449,14 +477,13 @@ if archivo_excel is not None:
 
             # Caso: la hora es un string (o fue convertida a string)
             try:
-                # Intenta convertir a string y luego dividir
                 time_str = str(time_val)
                 parts = time_str.split(':')
                 if len(parts) == 2:
                     return f"{time_str}:00"
                 elif len(parts) == 3:
                     return time_str
-                # Si es un datetime.time object (por ejemplo, si Excel lo leyó así)
+                # Si es un datetime.time object
                 elif isinstance(time_val, datetime.time):
                     return time_val.strftime("%H:%M:%S")
                 else:
@@ -499,9 +526,9 @@ if archivo_excel is not None:
 
         df_raw['FECHA_CLAVE_TURNO'] = df_raw.apply(asignar_fecha_clave_turno_corregida, axis=1)
 
-        st.success(f"✅ Archivo cargado y preprocesado con éxito. Se encontraron {len(df_raw['FECHA_CLAVE_TURNO'].unique())} días de jornada para procesar.")
+        st.success(f"✅ Archivo cargado y preprocesado con éxito. Se encontraron {len(df_raw['FECHA_CLAVE_TURNO'].unique())} días de jornada para procesar de {len(df_raw['id_trabajador'].unique())} trabajadores filtrados.")
 
-        # --- Ejecutar el Cálculo (Cambiando la llamada a la función) ---
+        # --- Ejecutar el Cálculo ---
         df_resultado = calcular_turnos(
             df_raw.copy(),
             LUGARES_PUESTOS_NORMALIZADOS, # Prioridad 1
