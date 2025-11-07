@@ -143,13 +143,8 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
 
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date):
     """
-    Busca el turno programado más cercano a la marcación de entrada,
-    verificando los turnos que inician en la FECHA_CLAVE_TURNO y,
-    si es temprano en la mañana, también los nocturnos del día anterior.
-
-    Utiliza las tolerancias actualizadas (TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS y TOLERANCIA_ASIGNACION_TARDE_MINUTOS)
-    para definir la ventana de asignación de turno.
-
+    Busca el turno programado más cercano (menor diferencia absoluta) a la marcación de entrada,
+    dentro de las ventanas de tolerancia.
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
     mejor_turno_data = None
@@ -167,10 +162,10 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
         # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA ---
-        # 1. El límite más temprano que aceptamos la entrada (TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
+        # 1. Límite más temprano (6 horas antes)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
 
-        # 2. El límite más tardío que aceptamos la entrada (TOLERANCIA_ASIGNACION_TARDE_MINUTOS)
+        # 2. Límite más tardío (3 horas después)
         rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS)
 
         # Validar si el evento (la entrada) cae en esta ventana estricta alrededor del INICIO PROGRAMADO.
@@ -179,6 +174,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
             # La diferencia se calcula entre la entrada real y el inicio PROGRAMADO del turno
             diferencia = abs(fecha_hora_evento - inicio_posible_turno)
 
+            # Buscamos la menor diferencia absoluta para encontrar el turno más probable
             if mejor_turno_data is None or diferencia < menor_diferencia:
                 mejor_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
                 menor_diferencia = diferencia
@@ -190,9 +186,10 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 def _encontrar_mejor_jornada(grupo_completo: pd.DataFrame, lugares_normalizados: list, fecha_clave_turno: datetime.date):
     """
     Busca la mejor marcación de entrada dentro de los lugares_normalizados
-    que se alinee con un turno programado.
+    que se alinee con un turno programado (el que esté más cerca).
     Retorna: (mejor_entrada_dt, turno_data)
     """
+    # 1. Filtrar solo entradas que estén en la lista de lugares provista (Puestos o Porterías)
     entradas_candidatas = grupo_completo[
         (grupo_completo['TIPO_MARCACION'] == 'ent') &
         (grupo_completo['PORTERIA_NORMALIZADA'].isin(lugares_normalizados))
@@ -206,14 +203,15 @@ def _encontrar_mejor_jornada(grupo_completo: pd.DataFrame, lugares_normalizados:
         for index, row in entradas_candidatas.iterrows():
             current_entry_time = row['FECHA_HORA']
 
-            # Intentar asignar un turno a esta marcación de entrada
+            # 2. Intentar asignar un turno a esta marcación (busca el más cercano dentro de la ventana de +/- 6h)
             turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
             turno_nombre_temp, info_turno_temp, inicio_turno_temp, _, _ = turno_data
 
             if turno_nombre_temp is not None:
-                # Calcula la diferencia absoluta con el inicio programado
+                # 3. Calcula la diferencia absoluta con el inicio programado del turno
                 diferencia = abs(current_entry_time - inicio_turno_temp)
 
+                # 4. Si es la mejor diferencia hasta ahora, guardarla
                 if pd.isna(mejor_entrada) or diferencia < menor_diferencia:
                     menor_diferencia = diferencia
                     mejor_entrada = current_entry_time
@@ -227,7 +225,7 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
     Agrupa por ID y luego por FECHA_CLAVE_TURNO.
     Implementa la lógica de prioridad de lugares (Puestos > Porterías) y el filtro de límites.
     """
-
+    
     # 1. Filtro inicial solo por tipo de marcación (ent/sal) y ordenar
     df_base = df[df['TIPO_MARCACION'].isin(['ent', 'sal'])].copy()
     df_base.sort_values(by=['id_trabajador', 'FECHA_HORA'], inplace=True)
@@ -242,7 +240,6 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
         nombre = grupo_trabajador['nombre'].iloc[0]
 
         # 1. IDENTIFICAR RANGO ACTIVO DE JORNADAS (FECHA_CLAVE_TURNO con al menos una ENTRADA)
-        # Usamos el tipo object/string de id_trabajador que viene del pre-filtro
         fechas_con_entrada = grupo_trabajador[grupo_trabajador['TIPO_MARCACION'] == 'ent']['FECHA_CLAVE_TURNO'].unique()
 
         if fechas_con_entrada.size == 0:
@@ -268,7 +265,7 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
             salida_fue_real = False
             porterias_validas = [] # Lista de lugares que finalmente se usó para la ENTRADA/SALIDA
 
-            # --- 3. LÓGICA DE PRIORIDAD: PUESTOS DE TRABAJO ---
+            # --- 3. LÓGICA DE PRIORIDAD: PASADA 1 (PUESTOS DE TRABAJO) ---
             entrada_real, mejor_turno_data = _encontrar_mejor_jornada(
                 grupo_completo, puestos_normalizados, fecha_clave_turno
             )
@@ -277,7 +274,7 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
                 # Se encontró una jornada válida con Puestos
                 porterias_validas = puestos_normalizados
             else:
-                # --- 4. FALLBACK: PORTERIAS ---
+                # --- 4. FALLBACK: PASADA 2 (PORTERIAS) ---
                 entrada_real, mejor_turno_data = _encontrar_mejor_jornada(
                     grupo_completo, porterias_normalizadas, fecha_clave_turno
                 )
@@ -289,7 +286,6 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
                     # Caso: No se encontró entrada válida en Puestos ni en Porterías
                     estado_calculo = "Turno No Asignado (Entrada no alinea con turno)"
                     pass
-
 
             # --- CONTINUAR CÁLCULO SI SE ENCONTRÓ UNA ENTRADA VÁLIDA ---
             if pd.notna(entrada_real):
@@ -303,6 +299,7 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
                 max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
 
                 # Filtrar salidas que están DENTRO de los LUGARES VALIDADOS (Puestos o Porterías)
+                # OJO: La salida debe pertenecer al mismo tipo de lugar que la entrada (implícito en valid_salidas)
                 valid_salidas = grupo_completo[
                     (grupo_completo['TIPO_MARCACION'] == 'sal') &
                     (grupo_completo['FECHA_HORA'] > entrada_real) &
@@ -375,11 +372,10 @@ def calcular_turnos(df: pd.DataFrame, puestos_normalizados: list, porterias_norm
             is_boundary_date = (fecha_clave_turno == min_fecha_activa) or (fecha_clave_turno == max_fecha_activa)
 
             # FILTRO 1: Descartar jornadas ASUMIDAS en los días de límite
-            # Esto resuelve la inconsistencia de turnos nocturnos en el primer/último día de carga
             if is_boundary_date and estado_calculo == "ASUMIDO (Falta Salida/Salida Inválida)":
                 continue # Omitir este cálculo
 
-            # FILTRO 2: Descartar jornadas SAL-only (que se agrupan al día anterior, pero no tienen entrada)
+            # FILTRO 2: Descartar jornadas SAL-only
             if pd.isna(entrada_real) and not grupo_completo[grupo_completo['TIPO_MARCACION'] == 'sal'].empty and estado_calculo == "Sin Marcaciones Válidas (E/S)":
                  continue # Omitir este cálculo
 
@@ -426,7 +422,12 @@ archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 if archivo_excel is not None:
     try:
         # Lee la primera hoja si no se especifica
-        df_raw = pd.read_excel(archivo_excel)
+        # OJO: Se cambió para leer la hoja 'data' explícitamente, si existe. Si no existe, leerá la primera.
+        try:
+             df_raw = pd.read_excel(archivo_excel, sheet_name='data')
+        except ValueError:
+             df_raw = pd.read_excel(archivo_excel)
+
 
         # 1. Definir la lista de nombres de columna que esperamos DESPUÉS de convertirlos a minúsculas
         columnas_requeridas_lower = [
@@ -446,7 +447,7 @@ if archivo_excel is not None:
         df_raw = df_raw[columnas_requeridas_lower].copy()
         df_raw.rename(columns={'codtrabajador': 'id_trabajador'}, inplace=True)
 
-        # --- FILTRADO POR CÓDIGO DE TRABAJADOR (Refactorizado para máxima robustez) ---
+        # --- FILTRADO POR CÓDIGO DE TRABAJADOR (Máxima Robustez STR) ---
         
         # 1. Preparar el filtro como strings para robustez (cubre IDs numéricos grandes y pequeños)
         codigos_filtro_str = [str(c) for c in CODIGOS_TRABAJADORES_FILTRO]
