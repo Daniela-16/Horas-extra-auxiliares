@@ -109,6 +109,8 @@ TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360
 # NUEVA TOLERANCIA: Máxima tardanza permitida para que una entrada CUENTE para la ASIGNACIÓN de un turno.
 TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 # 3 horas de margen para la asignación (13:40 + 3h = 16:40)
 
+# HORA MÍNIMA DE ENTRADA DIURNA: Solo se aceptan entradas a partir de esta hora para turnos matutinos.
+HORA_MINIMA_ENTRADA_DIURNA = datetime.strptime("04:00:00", "%H:%M:%S").time()
 
 # --- HORAS EXTRA LLEGADA TEMPRANO ---
 # Umbral de tiempo (en minutos) para determinar si la llegada temprana se paga desde la hora real.
@@ -157,6 +159,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     Busca el turno programado más cercano a la marcación de entrada.
     PRIORIZA LA ENTRADA MÁS TEMPRANA que cae dentro de la ventana de aceptación de CUALQUIER turno.
 
+    Aplica la restricción de hora mínima (4:00 AM) para turnos diurnos.
+
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
     mejor_turno_data = None
@@ -173,6 +177,17 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
         turnos_candidatos.extend(buscar_turnos_posibles(fecha_clave_anterior))
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
+
+        es_nocturno = info_turno.get("nocturno", False)
+        
+        # --- RESTRICCIÓN SOLICITADA: FILTRO 4:00 AM SOLO PARA TURNOS DIURNOS ---
+        # Si el turno NO es nocturno, la entrada DEBE ser a partir de las 4:00 AM del día clave.
+        if not es_nocturno:
+            hora_limite_diurna = datetime.combine(fecha_clave_asignada, HORA_MINIMA_ENTRADA_DIURNA)
+            if fecha_hora_evento < hora_limite_diurna:
+                # Si la entrada es antes de las 4:00 AM y NO es nocturna, se descarta este turno candidato.
+                continue
+        # ----------------------------------------------------------------------
 
         # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Actualizada con doble tolerancia) ---
         # 1. El límite más temprano que aceptamos la entrada (6 horas antes)
@@ -377,7 +392,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
     return pd.DataFrame(resultados)
 
 # ----------------------------------------------------------------------------------
-# --- 5. FUNCIÓN DE FILTRADO POST-CÁLCULO (LÓGICA ACTUALIZADA SOLICITADA) ---
+# --- 5. FUNCIÓN DE FILTRADO POST-CÁLCULO (LÓGICA ANTERIORMENTE MODIFICADA) ---
 
 def aplicar_filtro_primer_ultimo_dia(df_resultado):
     """
@@ -682,6 +697,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
