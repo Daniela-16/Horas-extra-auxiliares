@@ -30,8 +30,10 @@ TURNOS = {
     "LV": { # Lunes a Viernes (0-4)
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
+        "Turno 4 LV": {"inicio": "7:00:00", "fin": "17:00:00", "duracion_hrs": 8, "nocturno": True},
         # Turno nocturno: Inicia un día y termina al día siguiente
         "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
+        
     },
     "SAB": { # Sábado (5)
         "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
@@ -691,6 +693,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
