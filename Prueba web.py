@@ -27,25 +27,25 @@ CODIGOS_TRABAJADORES_FILTRO = [
 # --- 1. Definición de los Turnos ---
 
 TURNOS = {
-    "LV": { # Lunes a Viernes (0-4)
-        "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
-        "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
-        "Turno 4 LV": {"inicio": "7:00:00", "fin": "17:00:00", "duracion_hrs": 10},
-        # Turno nocturno: Inicia un día y termina al día siguiente
-        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
-        
-    },
-    "SAB": { # Sábado (5)
-        "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
-        "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
-    },
-    "DOM": { # Domingo (6)
-        "Turno 1 DOM": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
-        "Turno 2 DOM": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
-        # Turno nocturno de Domingo: Ligeramente más tarde que los días de semana
-        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40:00", "duracion_hrs": 7, "nocturno": True},
-    }
+    "LV": { # Lunes a Viernes (0-4)
+        "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
+        "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
+        "Turno 4 LV": {"inicio": "7:00:00", "fin": "17:00:00", "duracion_hrs": 10},
+        # Turno nocturno: Inicia un día y termina al día siguiente
+        "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
+        
+    },
+    "SAB": { # Sábado (5)
+        "Turno 1 SAB": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
+        "Turno 2 SAB": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
+        "Turno 3 SAB": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
+    },
+    "DOM": { # Domingo (6)
+        "Turno 1 DOM": {"inicio": "05:40:00", "fin": "11:40:00", "duracion_hrs": 6},
+        "Turno 2 DOM": {"inicio": "11:40:00", "fin": "17:40:00", "duracion_hrs": 6},
+        # Turno nocturno de Domingo: Ligeramente más tarde que los días de semana
+        "Turno 3 DOM": {"inicio": "22:40:00", "fin": "05:40:00", "duracion_hrs": 7, "nocturno": True},
+    }
 }
 
 # --- 2. Configuración de Puntos de Marcación (Separados por Prioridad) ---
@@ -682,6 +682,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
