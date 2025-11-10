@@ -30,6 +30,7 @@ TURNOS = {
     "LV": { # Lunes a Viernes (0-4)
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
+        # Turno 4 LV (7:00 a 17:00 son 10 horas)
         "Turno 4 LV": {"inicio": "7:00:00", "fin": "17:00:00", "duracion_hrs": 10},
         # Turno nocturno: Inicia un día y termina al día siguiente
         "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
@@ -136,8 +137,19 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
     turnos_dia = []
     if tipo_dia in TURNOS:
         for nombre_turno, info_turno in TURNOS[tipo_dia].items():
-            hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
-            hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
+            # Manejo robusto de la hora si viene como datetime.time (aunque debería ser string aquí)
+            try:
+                hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
+                hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
+            except ValueError:
+                # Si el formato no es H:M:S, asumimos H:M y añadimos :00
+                try:
+                    hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M").time()
+                    hora_fin = datetime.strptime(info_turno["fin"], "%H:%M").time()
+                except:
+                    # Fallback si hay problemas en la definición
+                    continue 
+
             es_nocturno = info_turno.get("nocturno", False)
 
             inicio_posible_turno = datetime.combine(fecha_clave, hora_inicio)
@@ -154,14 +166,12 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
 
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date):
     """
-    Busca el turno programado más cercano a la marcación de entrada.
-    PRIORIZA LA ENTRADA MÁS TEMPRANA que cae dentro de la ventana de aceptación de CUALQUIER turno.
-
+    Busca el turno programado más cercano a la marcación de entrada (PRIORIDAD DE PROXIMIDAD).
+    
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
     mejor_turno_data = None
-    # Inicializamos con la hora más lejana posible para priorizar la hora más pequeña
-    mejor_hora_entrada = datetime.max 
+    min_diff = timedelta.max # Rastrea la diferencia mínima absoluta
 
     # Candidatos a turno para el día de la FECHA CLAVE (Día X)
     turnos_candidatos = buscar_turnos_posibles(fecha_clave_turno_reporte)
@@ -174,7 +184,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA (Actualizada con doble tolerancia) ---
+        # --- LÓGICA DE RESTRICCIÓN DE VENTANA DE ENTRADA ---
         # 1. El límite más temprano que aceptamos la entrada (6 horas antes)
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
         
@@ -184,13 +194,15 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
         # Validar si el evento (la entrada) cae en esta ventana estricta alrededor del INICIO PROGRAMADO.
         if fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
             
-            current_entry_time = fecha_hora_evento
-
-            # PRIORIZACIÓN: Si es el primer turno encontrado O si esta entrada es ANTERIOR a la mejor encontrada hasta ahora
-            if mejor_turno_data is None or current_entry_time < mejor_hora_entrada:
+            # --- NUEVA LÓGICA DE PRIORIZACIÓN POR PROXIMIDAD ---
+            # Calcula la diferencia de tiempo absoluta entre la entrada real y el inicio programado del turno.
+            diff = abs(fecha_hora_evento - inicio_posible_turno)
+            
+            # PRIORIZACIÓN: Si es el primer turno encontrado O si esta diferencia es MENOR a la mejor encontrada hasta ahora
+            if mejor_turno_data is None or diff < min_diff:
+                min_diff = diff
                 mejor_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
-                mejor_hora_entrada = current_entry_time # Guardar la hora de entrada más temprana encontrada
-
+                
     return mejor_turno_data if mejor_turno_data else (None, None, None, None, None)
 
 # --- 4. Calculo de horas (Añadida columna Es_Nocturno) ---
@@ -240,9 +252,11 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             mejor_hora_entrada_global = datetime.max 
             for index, row in entradas_puesto.iterrows():
                 current_entry_time = row['FECHA_HORA']
+                # Esta llamada ahora usa la lógica de proximidad (min_diff) dentro de la función
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 
                 if turno_data[0] is not None:
+                    # La asignación final se basa en la entrada física más temprana que sí pudo ser asignada a un turno
                     if current_entry_time < mejor_hora_entrada_global:
                         mejor_hora_entrada_global = current_entry_time
                         mejor_entrada_para_turno = current_entry_time
@@ -256,9 +270,11 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 mejor_hora_entrada_global = datetime.max
                 for index, row in entradas_porteria.iterrows():
                     current_entry_time = row['FECHA_HORA']
+                    # Esta llamada ahora usa la lógica de proximidad (min_diff) dentro de la función
                     turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                     
                     if turno_data[0] is not None:
+                        # La asignación final se basa en la entrada física más temprana que sí pudo ser asignada a un turno
                         if current_entry_time < mejor_hora_entrada_global:
                             mejor_hora_entrada_global = current_entry_time
                             mejor_entrada_para_turno = current_entry_time
