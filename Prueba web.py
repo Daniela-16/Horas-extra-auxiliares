@@ -14,13 +14,14 @@ import numpy as np
 
 # --- CÓDIGOS DE TRABAJADORES PERMITIDOS (ACTUALIZADO) ---
 # Se filtra el DataFrame de entrada para incluir SOLAMENTE los registros con estos ID.
+# Se eliminó el carácter invisible U+00A0 que causaba el SyntaxError.
 CODIGOS_TRABAJADORES_FILTRO = [
-    81169, 82911, 81515, 81744, 82728, 83617, 81594, 81215, 79114, 80531,
-    71329, 82383, 79143, 80796, 80795, 79830, 80584, 81131, 79110, 80530,
-    82236, 82645, 80532, 71332, 82441, 79030, 81020, 82724, 82406, 81953,
-    81164, 81024, 81328, 81957, 80577, 14042, 82803, 80233, 83521, 82226,
-    71337381, 82631, 82725, 83309, 81947, 82385, 80765, 82642, 1128268115,
-    80526, 82979, 81240, 81873, 83320, 82617, 82243, 81948, 82954
+    81169, 82911, 81515, 81744, 82728, 83617, 81594, 81215, 79114, 80531,
+    71329, 82383, 79143, 80796, 80795, 79830, 80584, 81131, 79110, 80530,
+    82236, 82645, 80532, 71332, 82441, 79030, 81020, 82724, 82406, 81953,
+    81164, 81024, 81328, 81957, 80577, 14042, 82803, 80233, 83521, 82226,
+    71337381, 82631, 82725, 83309, 81947, 82385, 80765, 82642, 1128268115,
+    80526, 82979, 81240, 81873, 83320, 82617, 82243, 81948, 82954
 ]
 # Se asegura que la lista de códigos sea de tipo entero para la comparación.
 
@@ -441,23 +442,23 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
                 
             # --- Primer Día ---
             elif current_date == first_day:
-                # Si hay un solo día, se mantiene. Si son varios, aplicamos la restricción:
+                # Caso: Día Único (Se mantiene todo por defecto)
                 if current_date == last_day:
-                    # Caso: Día Único (Se mantiene todo por defecto)
                     rows_to_keep_indices.extend(df_worker[df_worker['FECHA_DATE'] == current_date].index.tolist())
                 else:
-                    # Primer día de muchos: Conservar solo turnos Nocturnos y Diurnos.
-                    # El turno que *termina* en Day 1 pero empezó antes ya fue filtrado por FECHA_CLAVE_TURNO.
-                    # Mantenemos todos los turnos que EMPEZARON en el primer día.
+                    # Primer día de muchos: Mantenemos solo los turnos nocturnos, ya que la entrada es "viable" para un turno nocturno
+                    # y el turno diurno ya estaría completo en el reporte.
+                    # Mantenemos TODOS los turnos para evitar perder la entrada del primer día de la jornada.
+                    # El ajuste de lógica debe ocurrir *antes* del filtro, en la asignación de FECHA_CLAVE_TURNO.
                     rows_to_keep_indices.extend(df_worker[df_worker['FECHA_DATE'] == current_date].index.tolist())
+
 
             # --- Último Día ---
             elif current_date == last_day:
-                # El último día DEBE excluir la entrada de turno nocturno (21:40), 
-                # ya que su salida está fuera del rango del reporte.
+                # El último día solo mantiene los turnos que NO son nocturnos (diurnos), 
+                # excluyendo la entrada nocturna de la que no veremos la salida.
                 
                 # Solo mantenemos los turnos que NO son nocturnos (es decir, turnos diurnos)
-                # y que completaron su ciclo de entrada/salida dentro del rango o se asumió su salida.
                 rows_to_keep_indices.extend(df_worker[
                     (df_worker['FECHA_DATE'] == current_date) & 
                     (df_worker['Es_Nocturno'] == False)
@@ -710,9 +711,6 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
-
 
 
 
