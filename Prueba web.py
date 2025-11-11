@@ -21,9 +21,8 @@ import streamlit as st
 import io
 import numpy as np
 
-# --- CÓDIGOS DE TRABAJADORES PERMITIDOS
+# --- CÓDIGOS DE TRABAJADORES PERMITIDOS (ACTUALIZADO) ---
 # Se filtra el DataFrame de entrada para incluir SOLAMENTE los registros con estos ID.
-
 CODIGOS_TRABAJADORES_FILTRO = [
     81169, 82911, 81515, 81744, 82728, 83617, 81594, 81215, 79114, 80531,
     71329, 82383, 79143, 80796, 80795, 79830, 80584, 81131, 79110, 80530,
@@ -321,6 +320,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 max_salida_aceptable_temp = inicio_programado + timedelta(hours=MAX_DURACION_JORNADA_HRS_SELECCION)
                 
                 salidas_validas = salidas[
+                    (salidas['TIPO_MARCACION'] == 'sal') &
                     (salidas['FECHA_HORA'] > current_entry_time) &
                     (salidas['FECHA_HORA'] <= max_salida_aceptable_temp)
                 ]
@@ -362,9 +362,12 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                         
         
         # --- C. Asignación y Cálculo Final (El resto del código se mantiene) ---
-        if pd.notna(mejor_entrada_para_turno):
+        # FIX para el error 'NoneType' object has no attribute 'get':
+        # Solo procedemos al cálculo si se ha encontrado un turno (mejor_turno_data[0] no es None)
+        if mejor_turno_data[0] is not None:
             entrada_real = mejor_entrada_para_turno
             turno_nombre, info_turno, inicio_turno, fin_turno, fecha_clave_final = mejor_turno_data
+            # Ahora info_turno es un diccionario, el .get() es seguro.
             es_nocturno_flag = info_turno.get("nocturno", False)
             
             # Asegurar que se encuentra el lugar de marcación correcto para el reporte
@@ -431,7 +434,14 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
 
         else:
             estado_calculo = "Turno No Asignado (Ninguna marcación se alinea con un turno programado)"
-
+            # Si no se asignó turno, aseguramos que las horas queden en 0
+            horas_trabajadas = 0.0
+            horas_extra = 0.0
+            inicio_turno = None # Aseguramos que los valores sean N/A en el reporte si no hay turno
+            fin_turno = None
+            info_turno = None
+            es_nocturno_flag = False
+            
         if pd.isna(entrada_real) and not grupo[grupo['TIPO_MARCACION'] == 'sal'].empty:
             continue
             
@@ -759,7 +769,6 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
 
 
 
