@@ -21,8 +21,9 @@ import streamlit as st
 import io
 import numpy as np
 
-# --- CÓDIGOS DE TRABAJADORES PERMITIDOS (ACTUALIZADO) ---
+# --- CÓDIGOS DE TRABAJADORES PERMITIDOS
 # Se filtra el DataFrame de entrada para incluir SOLAMENTE los registros con estos ID.
+
 CODIGOS_TRABAJADORES_FILTRO = [
     81169, 82911, 81515, 81744, 82728, 83617, 81594, 81215, 79114, 80531,
     71329, 82383, 79143, 80796, 80795, 79830, 80584, 81131, 79110, 80530,
@@ -758,6 +759,7 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
 
