@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 Calculadora de Horas Extra.
-CORRECCIÓN CLAVE: La asignación de turno ahora prioriza la entrada que genera
-la mayor duración de jornada potencial, resolviendo la confusión entre la
-Entrada principal (ej. 13:18) y las marcaciones de desplazamiento nocturno (ej. 21:29).
+CORRECCIÓN CLAVE: Se implementa la PRIORIZACIÓN DE ASIGNACIÓN:
+El Turno 4 (T4) solo se asigna si el registro de entrada no puede asociarse
+a un Turno 1, 2 o 3 (T1, T2, T3), respetando el criterio de la jornada más larga.
 """
 
 import pandas as pd
@@ -29,6 +29,7 @@ TURNOS = {
     "LV": { # Lunes a Viernes (0-4)
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
+        "Turno 4 LV": {"inicio": "07:00:00", "fin": "17:00:00", "duracion_hrs": 10},
         # Turno nocturno: Inicia un día y termina al día siguiente
         "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
         
@@ -135,10 +136,13 @@ UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
-# --- 3. Obtener turno basado en fecha y hora ---
+# --- 3. Obtener turno basado en fecha y hora (MODIFICADO) ---
 
 def buscar_turnos_posibles(fecha_clave: datetime.date):
-    """Genera una lista de (nombre_turno, info, inicio_dt, fin_dt, fecha_clave_asignada) para un día."""
+    """
+    Genera una lista de (nombre_turno, info, inicio_dt, fin_dt, fecha_clave_asignada, prioridad) para un día.
+    PRIORIDAD: 1 (Turnos 1, 2, 3), 2 (Turno 4).
+    """
     dia_semana_clave = fecha_clave.weekday()
 
     if dia_semana_clave < 5: tipo_dia = "LV"
@@ -148,6 +152,13 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
     turnos_dia = []
     if tipo_dia in TURNOS:
         for nombre_turno, info_turno in TURNOS[tipo_dia].items():
+            
+            # --- NUEVA LÓGICA DE PRIORIDAD ---
+            # Asignamos prioridad 1 a T1, T2, T3. Prioridad 2 a T4.
+            prioridad = 1
+            if "Turno 4" in nombre_turno:
+                 prioridad = 2
+
             hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
             hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
             es_nocturno = info_turno.get("nocturno", False)
@@ -159,21 +170,30 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
             else:
                 fin_posible_turno = datetime.combine(fecha_clave, hora_fin)
 
-            turnos_dia.append((nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave))
-    return turnos_dia
+            turnos_dia.append((nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave, prioridad))
+            
+    # Ordenamos: Primero prioridad 1 (T1, T2, T3), luego prioridad 2 (T4)
+    return sorted(turnos_dia, key=lambda x: x[5]) 
 
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date):
     """
     Busca el turno programado más cercano a la marcación de entrada.
-    Prioriza el turno con la menor distancia absoluta a la hora de inicio programada,
-    resolviendo la ambigüedad de marcaciones de desplazamiento.
+    Aplica una LÓGICA DE PRIORIZACIÓN DE TURNOS (T1, T2, T3 sobre T4)
+    y luego usa la menor distancia absoluta a la hora de inicio programada.
     
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
-    mejor_turno_data = None
-    mejor_distancia_a_inicio = timedelta.max  
+    
+    # Datos del mejor turno encontrado (puede ser T1, T2, T3 o T4)
+    mejor_turno_data_general = (None, None, None, None, None) 
+    mejor_distancia_general = timedelta.max
+    
+    # Datos del mejor turno prioritario (solo T1, T2, T3)
+    mejor_turno_data_prioritario = (None, None, None, None, None)
+    mejor_distancia_prioritario = timedelta.max
 
     # --- 1. Generar Candidatos de Turno (Día X y Día X-1) ---
+    # La lista de candidatos ya está ordenada: Prioridad 1 (T1, T2, T3) primero, luego Prioridad 2 (T4)
     turnos_candidatos = buscar_turnos_posibles(fecha_clave_turno_reporte)
     hora_evento = fecha_hora_evento.time()
     
@@ -182,39 +202,58 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
         fecha_clave_anterior = fecha_clave_turno_reporte - timedelta(days=1)
         turnos_candidatos.extend(buscar_turnos_posibles(fecha_clave_anterior))
 
+    # Re-ordenar por prioridad para asegurar que T1/T2/T3 se prueben antes
+    turnos_candidatos = sorted(turnos_candidatos, key=lambda x: x[5])
     
-    for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
+    # --- 2. Primera Pasada: Asignar Turnos Prioritarios (T1, T2, T3) ---
+    for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada, prioridad in turnos_candidatos:
 
         es_nocturno = info_turno.get("nocturno", False)
         
-        # 1. El límite más temprano que aceptamos la entrada (6 horas antes por defecto)
+        # 2.1. Definir rango de ventana de marcación
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
-        
-        # 2. El límite más tardío que aceptamos la entrada (Tolerancia amplia por defecto, 3 horas)
         rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS + 5)
         
-        
-        # --- RESTRICCIÓN CLAVE: EVITAR MARCADAS DE MADRUGADA COMO ENTRADA NOCTURNA (22:40) ---
-        # Si es nocturno (T3), solo aceptamos entradas hasta 60 minutos después de la hora programada.
+        # Restricción Clave Nocturna (T3)
         if es_nocturno:
              rango_fin_tarde = inicio_posible_turno + timedelta(minutes=60)
 
-
-        # Validar si el evento (la entrada) cae en esta ventana
+        # 2.2. Validar si la marcación cae en la ventana
         if fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
             
             # Métrica de prioridad: la menor DISTANCIA ABSOLUTA al inicio programado.
             distancia_a_inicio = abs(fecha_hora_evento - inicio_posible_turno)
+            
+            current_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
 
-            # Priorización: Si es el primer turno encontrado O si es más cercano al inicio programado
-            if mejor_turno_data is None or distancia_a_inicio < mejor_distancia_a_inicio:
-                
-                # Usamos <= para mantener la marcación más temprana si hay empates
-                if distancia_a_inicio <= mejor_distancia_a_inicio:
-                    mejor_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
-                    mejor_distancia_a_inicio = distancia_a_inicio 
+            if prioridad == 1:
+                # Si es un turno prioritario, lo guardamos como el mejor prioritario
+                if mejor_turno_data_prioritario[0] is None or distancia_a_inicio < mejor_distancia_prioritario:
+                    mejor_distancia_prioritario = distancia_a_inicio
+                    mejor_turno_data_prioritario = current_turno_data
+            
+            # Guardar siempre la mejor opción general por si no hay prioritarios
+            if mejor_turno_data_general[0] is None or distancia_a_inicio < mejor_distancia_general:
+                mejor_distancia_general = distancia_a_inicio
+                mejor_turno_data_general = current_turno_data
 
-    return mejor_turno_data if mejor_turno_data else (None, None, None, None, None)
+
+    # --- 3. Decisión Final ---
+    # Si encontramos un turno prioritario (T1, T2, T3) válido, lo usamos.
+    if mejor_turno_data_prioritario[0] is not None:
+        return mejor_turno_data_prioritario
+    
+    # Si no, usamos el mejor turno general (que podría ser el T4 más cercano, si fue el único encontrado).
+    elif mejor_turno_data_general[0] is not None:
+         # Verificamos que al menos se haya intentado asignar a uno de los turnos T1, T2, T3 y no haya sido posible
+         # Si el mejor general es T4 (prioridad 2), y se consideró, se acepta.
+         if "Turno 4" in mejor_turno_data_general[0]:
+              return mejor_turno_data_general
+         
+         # En caso contrario (por ejemplo, si la marcación fue tan alejada que solo se alineó con T4), lo devolvemos.
+         return mejor_turno_data_general
+         
+    return (None, None, None, None, None)
 
 # --- 4. Calculo de horas (Lógica modificada para priorizar la jornada más larga) ---
 
@@ -276,6 +315,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         
         for entrada_row, prioridad in candidatos_a_evaluar:
             current_entry_time = entrada_row['FECHA_HORA']
+            # Esta función AHORA implementa la prioridad T1/T2/T3 sobre T4
             turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
             
             if turno_data[0] is not None:
@@ -437,10 +477,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
     return pd.DataFrame(resultados)
 
 # -----------------------------------------------------------------------------
-# --- El resto del código (Funciones 5 y 6) se mantiene sin cambios, 
-#     ya que no estaban relacionadas con el error de asignación. ---
-# -----------------------------------------------------------------------------
-
 # --- 5. Nueva Función de Filtrado Post-Cálculo (Filtro de Días Extremos) ---
 
 def aplicar_filtro_primer_ultimo_dia(df_resultado):
@@ -525,7 +561,7 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
 st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
-st.caption("La asignación de turno prioriza la **mayor duración de jornada real** en caso de ambigüedad de marcación.")
+st.caption("La asignación de turno prioriza la **mayor duración de jornada real** en caso de ambigüedad de marcación. **El Turno 4 es ahora la última opción de asignación**.")
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
 
@@ -570,7 +606,7 @@ if archivo_excel is not None:
         if df_raw.empty:
             st.error("⚠️ ERROR: Después del filtrado por código de trabajador, no quedan registros para procesar.")
             st.stop()
-        
+            
         # Preprocesamiento de Fecha
         df_raw['fecha'] = pd.to_datetime(df_raw['fecha'], errors='coerce')  
         df_raw.dropna(subset=['fecha'], inplace=True)
@@ -732,9 +768,6 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
-
 
 
 
