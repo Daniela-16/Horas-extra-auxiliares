@@ -423,8 +423,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             'Horas': int(horas_extra),
             'Minutos': round((horas_extra - int(horas_extra)) * 60),
             'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag,
-            'Es_Nocturno': es_nocturno_flag,
-            'Estado_Calculo': estado_calculo # Agregar este campo para el reporte
+            'Es_Nocturno': es_nocturno_flag
+            
         })
 
     return pd.DataFrame(resultados)
@@ -652,7 +652,7 @@ if archivo_excel is not None:
                 'Inicio_Turno_Programado', 'Fin_Turno_Programado', 'Duracion_Turno_Programado_Hrs',
                 'ENTRADA_REAL', 'PORTERIA_ENTRADA', 'SALIDA_REAL', 'PORTERIA_SALIDA',
                 'Horas_Trabajadas_Netas', 'Horas_Extra', 'Horas', 'Minutos', 
-                'Estado_Llegada', 'Estado_Calculo'
+                'Estado_Llegada'
             ]
 
             st.subheader("Resultados de las Horas Extra")
@@ -729,3 +729,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
