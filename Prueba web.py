@@ -1,5 +1,3 @@
-Codigo del 12 de nov
-
 
 # -*- coding: utf-8 -*-
 
@@ -775,5 +773,6 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
