@@ -1,18 +1,3 @@
-# -*- coding: utf-8 -*-
-
-"""
-Calculadora de Horas Extra.
-
-CORRECCIÓN CLAVE: La asignación de entradas (Marcación de inicio de jornada)
-ahora sigue la siguiente prioridad estricta:
-1. Puesto de Trabajo: Se buscan entradas solo en Puestos de Trabajo.
-2. Portería: Si no hay entradas en Puestos de Trabajo, se buscan entradas en Porterías.
-3. PRIMERA ENTRADA VÁLIDA: Dentro del grupo de marcaciones priorizado, se selecciona la
-   PRIMERA marcación cronológica que puede ser asignada a un turno (T1, T2 o T3).
-   Las entradas posteriores (marcaciones intermedias) se ignoran para el inicio de jornada.
-
-"""
-
 import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
@@ -195,15 +180,12 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     # --- 2. Iterar y Evaluar ---
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        es_nocturno = info_turno.get("nocturno", False)
+        # No se necesita la restricción específica para T3, se usa la tolerancia general.
         
         # 2.1. Definir rango de ventana de marcación
         rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
-        rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS + 5)
-        
-        # Restricción Clave Nocturna (T3)
-        if es_nocturno:
-             rango_fin_tarde = inicio_posible_turno + timedelta(minutes=60)
+        # Se usa la tolerancia general para todos los turnos.
+        rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS + 5) 
 
         # 2.2. Validar si la marcación cae en la ventana
         if fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
@@ -212,7 +194,6 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
             current_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
 
             # Almacenar el mejor turno encontrado (el más cercano)
-            # Ya que la entrada es la misma, solo se elige el más cercano para desambiguación de turnos.
             if mejor_turno_data_general[0] is None or distancia_a_inicio < mejor_distancia_general:
                 mejor_distancia_general = distancia_a_inicio
                 mejor_turno_data_general = current_turno_data
@@ -298,12 +279,11 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 current_entry_time = entrada_row.FECHA_HORA
                 
                 # Buscamos el turno al que esta entrada se puede asignar
+                # Esta lógica ahora funciona correctamente gracias a la corrección en asignar_fecha_clave_turno_corregida
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 
                 if turno_data[0] is not None:
                     # Encontramos la PRIMERA entrada válida que asigna a un turno.
-                    # Esto garantiza que las marcaciones intermedias (posteriores) no
-                    # sean seleccionadas como inicio de jornada.
                     mejor_entrada_para_turno = current_entry_time
                     mejor_turno_data = turno_data
                     # Se rompe el bucle para usar la primera entrada encontrada
@@ -500,7 +480,7 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
 st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
-st.caption("La asignación de entrada ahora prioriza la **PRIMERA marcación válida** (Puesto de Trabajo > Portería) que se puede asignar a un turno, ignorando las entradas intermedias.")
+st.caption("La asignación de entrada ahora prioriza la **PRIMERA marcación válida** (Puesto de Trabajo > Portería) que se puede asignar a un turno. **Las entradas de madrugada se asocian al turno de noche del día anterior.**")
 
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
@@ -581,15 +561,23 @@ if archivo_excel is not None:
         df_raw['PORTERIA_NORMALIZADA'] = df_raw['porteria'].astype(str).str.strip().str.lower()
         df_raw['TIPO_MARCACION'] = df_raw['puntomarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
 
-        # --- Función para asignar Fecha Clave de Turno ---
+        # --- Función para asignar Fecha Clave de Turno (CORREGIDA) ---
         def asignar_fecha_clave_turno_corregida(row):
             fecha_original = row['FECHA_HORA'].date()
             hora_marcacion = row['FECHA_HORA'].time()
             tipo_marcacion = row['TIPO_MARCACION']
             
+            # Lógica corregida para ENTRADAS del turno nocturno (T3)
+            # Si la marcación de entrada ocurre antes de las 05:40 AM (hora de inicio del T1),
+            # se asume que pertenece al turno de noche que comenzó el día anterior.
             if tipo_marcacion == 'ent':
+                hora_corte_t3_ent = datetime.strptime("05:40:00", "%H:%M:%S").time()
+                if hora_marcacion < hora_corte_t3_ent:
+                    return fecha_original - timedelta(days=1)
+                
                 return fecha_original
             
+            # Lógica existente para SALIDAS (que terminan en la madrugada)
             if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
                 return fecha_original - timedelta(days=1)
             
@@ -708,8 +696,6 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
 
 
 
