@@ -1,5 +1,3 @@
-
-
 import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
@@ -120,8 +118,8 @@ LUGARES_COMBINADOS_NORMALIZADOS = LUGARES_PUESTO_TRABAJO_NORMALIZADOS + LUGARES_
 
 MAX_EXCESO_SALIDA_HRS = 3
 HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
-# Esta constante ya no se utiliza para el filtro condicional en calcular_turnos, pero se mantiene su valor
-HORA_CORTE_ENTRADA_TEMPRANA_T1 = datetime.strptime("05:00:00", "%H:%M:%S").time() 
+# Corte para Agrupación: Permite que las entradas de T1 a partir de las 03:00 AM se agrupen en la fecha correcta.
+HORA_CORTE_ENTRADA_T3_RESIDUAL = datetime.strptime("03:00:00", "%H:%M:%S").time() 
 
 # --- CONSTANTES DE TOLERANCIA ---
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
@@ -212,7 +210,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: list, tolerancia_llegada_tarde: int):
     """
     Agrupa por ID y FECHA_CLAVE_TURNO.
-    Aplica la prioridad: 1. Puesto de Trabajo > 2. Portería > 3. Primera Entrada Válida.
+    Aplica la prioridad: 1. Puesto de Trabajo > 2. Portería > 3. Primera Entrada Válida (con filtro T3).
     """
     
     df_filtrado = df[(df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
@@ -271,18 +269,48 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             estado_calculo = "Turno No Asignado (No hay entradas válidas en Puesto/Portería)"
             pass 
 
-        # --- B. Lógica de Selección: Primera Entrada Válida (SIMPLIFICADA) ---
+        # --- B. Lógica de Selección: Primera Entrada Válida (DINÁMICA) ---
         
         if not candidatos_a_evaluar_df.empty:
-            # Aseguramos que la iteración sea cronológica
             candidatos_a_evaluar_df = candidatos_a_evaluar_df.sort_values(by='FECHA_HORA')
             
+            # --- FILTRO DINÁMICO DE DESPLAZAMIENTO ---
+            first_entry_row = candidatos_a_evaluar_df.iloc[0]
+            first_entry_time = first_entry_row['FECHA_HORA']
+            first_entry_hour = first_entry_time.time()
+            
+            # 1. Definir ventanas de chequeo
+            t1_start_time = datetime.strptime(TURNOS['LV']['Turno 1 LV']['inicio'], "%H:%M:%S").time() # 05:40:00
+            t3_start_min = datetime.strptime("21:00:00", "%H:%M:%S").time()
+            t3_start_max = datetime.strptime("23:59:59", "%H:%M:%S").time()
+            
+            # 2. Condición: La primera entrada es de madrugada (antes de T1) Y NO es el inicio de T3.
+            is_early_morning_entry = first_entry_hour < t1_start_time and first_entry_hour < t3_start_min
+            
+            if is_early_morning_entry:
+                # 3. Verificar si el Turno 3 (21:00-23:59) se activó en esta jornada (FECHA_CLAVE_TURNO)
+                t3_start_found = entradas[
+                    (entradas['FECHA_HORA'].dt.date == fecha_clave_turno) & 
+                    (entradas['FECHA_HORA'].dt.time >= t3_start_min) & 
+                    (entradas['FECHA_HORA'].dt.time <= t3_start_max)
+                ]
+                
+                # Si se encontró una entrada T3 (21:00) Y la primera entrada actual es de madrugada: 
+                # -> Es un desplazamiento intermedio. La eliminamos de los candidatos.
+                if not t3_start_found.empty:
+                    candidatos_a_evaluar_df = candidatos_a_evaluar_df.iloc[1:].copy()
+                    estado_calculo = "Entrada Temprana Filtrada (Desplazamiento T3)"
+            
+            # --- Iteración sobre los candidatos (posiblemente filtrados) ---
+            
+            if candidatos_a_evaluar_df.empty and estado_calculo == "Entrada Temprana Filtrada (Desplazamiento T3)":
+                # Si la única entrada válida fue filtrada como desplazamiento, no hay más que hacer.
+                continue 
+
             for entrada_row in candidatos_a_evaluar_df.itertuples():
                 current_entry_time = entrada_row.FECHA_HORA
                 
                 # Buscamos el turno al que esta entrada se puede asignar
-                # Dado que la FECHA_CLAVE_TURNO ya está correcta (T3 agrupado, T1/T2 en su fecha),
-                # la primera que asigne a un turno es la correcta.
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 
                 if turno_data[0] is not None:
@@ -483,7 +511,7 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
 st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
-st.caption("La asignación de entrada ahora prioriza la **PRIMERA marcación válida** (Puesto de Trabajo > Portería) que se puede asignar a un turno.")
+st.caption("La asignación de entrada ahora prioriza la **PRIMERA marcación válida** (Puesto de Trabajo > Portería) que se puede asignar a un turno, aplicando un **filtro dinámico** para ignorar marcaciones intermedias del Turno 3.")
 
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
@@ -570,15 +598,14 @@ if archivo_excel is not None:
             hora_marcacion = row['FECHA_HORA'].time()
             tipo_marcacion = row['TIPO_MARCACION']
             
-            # CORRECCIÓN CLAVE: Usamos 05:00:00 como el corte para que T1 (05:40) 
-            # capture entradas tempranas legítimas (ej: 05:37) en la fecha correcta.
+            # Corte de Agrupación: 03:00:00 AM
             if tipo_marcacion == 'ent':
-                hora_corte_t3_ent = datetime.strptime("05:00:00", "%H:%M:%S").time() 
+                hora_corte_t3_ent = HORA_CORTE_ENTRADA_T3_RESIDUAL
                 if hora_marcacion < hora_corte_t3_ent:
-                    # Entradas de 00:00 a 04:59 se consideran T3 del día anterior
+                    # Entradas de 00:00 a 02:59 se consideran T3 del día anterior
                     return fecha_original - timedelta(days=1)
                 
-                # Entradas de 05:00 en adelante se consideran T1/T2 del día actual
+                # Entradas de 03:00 en adelante se consideran T1/T2 del día actual
                 return fecha_original
             
             # Lógica existente para SALIDAS
