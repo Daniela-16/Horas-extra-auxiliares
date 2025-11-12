@@ -267,7 +267,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         estado_calculo = "Sin Marcaciones Válidas (E/S)"
         salida_fue_real = False 
         es_nocturno_flag = False 
-        tipo_marcacion_priorizada = 'N/A' # Variable interna, ya no se incluye en el reporte final
+        tipo_marcacion_priorizada = 'N/A' # Variable interna
 
         # Variables para almacenar el mejor resultado
         mejor_candidato = {
@@ -281,20 +281,23 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         }
 
         # 1. Identificar todas las entradas válidas y su tipo de marcación
-        todas_entradas = entradas.copy()
+        # Se copian solo las columnas necesarias para evitar problemas de tipo de datos complejos en las copias
+        todas_entradas = entradas[['FECHA_HORA', 'PORTERIA_NORMALIZADA', 'porteria']].copy()
         
-        # 1.1 Asignar prioridad de lugar (1: Puesto de Trabajo, 2: Portería)
-        todas_entradas.loc[
-            todas_entradas['PORTERIA_NORMALIZADA'].isin(lugares_puesto),
-            ['PRIORIDAD_LUGAR', 'TIPO_LUGAR']
-        ] = [1, "Puesto de Trabajo"]
+        # Initialize columns explicitly before assignment
+        todas_entradas['PRIORIDAD_LUGAR'] = np.int64(3) # Asegura tipo entero
+        todas_entradas['TIPO_LUGAR'] = 'N/A'
 
-        todas_entradas.loc[
-            todas_entradas['PORTERIA_NORMALIZADA'].isin(lugares_porteria),
-            ['PRIORIDAD_LUGAR', 'TIPO_LUGAR']
-        ] = [2, "Portería"]
+        # 1.1 Asignar prioridad de lugar (1: Puesto de Trabajo, 2: Portería)
+        idx_puesto = todas_entradas['PORTERIA_NORMALIZADA'].isin(lugares_puesto)
+        todas_entradas.loc[idx_puesto, 'PRIORIDAD_LUGAR'] = np.int64(1)
+        todas_entradas.loc[idx_puesto, 'TIPO_LUGAR'] = "Puesto de Trabajo"
+
+        idx_porteria = todas_entradas['PORTERIA_NORMALIZADA'].isin(lugares_porteria)
+        todas_entradas.loc[idx_porteria, 'PRIORIDAD_LUGAR'] = np.int64(2)
+        todas_entradas.loc[idx_porteria, 'TIPO_LUGAR'] = "Portería"
         
-        todas_entradas.fillna({'PRIORIDAD_LUGAR': 3, 'TIPO_LUGAR': 'N/A'}, inplace=True)
+        # Filtrar las entradas que tienen un lugar asignado y ordenar
         todas_entradas = todas_entradas[todas_entradas['PRIORIDAD_LUGAR'] != 3].sort_values(by='FECHA_HORA')
 
         if todas_entradas.empty:
@@ -317,6 +320,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                     # 2.1. Determinar la salida real potencial para esta entrada
                     max_salida_aceptable = fin_programado + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
                     
+                    # Se filtra 'salidas' que ya es un DataFrame de marcaciones de salida
                     salidas_validas = salidas[
                         (salidas['FECHA_HORA'] > current_entry_time) &
                         (salidas['FECHA_HORA'] <= max_salida_aceptable)
@@ -326,7 +330,12 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                     
                     duracion_real_potencial = timedelta(seconds=0)
                     if pd.notna(salida_potencial):
-                        duracion_real_potencial = salida_potencial - current_entry_time
+                        # Asegurar que la resta es entre datetime/timedelta válidos
+                        try:
+                            duracion_real_potencial = salida_potencial - current_entry_time
+                        except:
+                            # Caso de seguridad: si la resta falla por tipos, se ignora
+                            duracion_real_potencial = timedelta(seconds=0)
                     
                     
                     # --- 3. Criterio de Selección Jerárquico ---
@@ -338,11 +347,13 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                     
                     # Criterio 2: Si la distancia es igual, preferir la jornada más larga
                     elif distancia == mejor_candidato['distancia']:
+                        # Comparamos timedeltas, esto es seguro
                         if duracion_real_potencial > mejor_candidato['duracion_real']:
                             is_mejor = True
                         
                         # Criterio 3: Si distancia y duración son iguales, preferir Puesto de Trabajo (PRIORIDAD DE LUGAR)
                         elif duracion_real_potencial == mejor_candidato['duracion_real']:
+                            # Comparamos integers, esto es seguro
                             if current_lugar_prioridad < mejor_candidato['lugar_prioridad']:
                                 is_mejor = True
                                 
@@ -365,7 +376,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 tipo_marcacion_priorizada = mejor_candidato['tipo_marcacion']
                 
                 # Asegurar que se encuentra el lugar de marcación correcto para el reporte
-                porteria_entrada = grupo[grupo['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
+                # Se utiliza una condición más segura para encontrar la portería
+                porteria_data = grupo[grupo['FECHA_HORA'] == entrada_real]
+                porteria_entrada = porteria_data['porteria'].iloc[0] if not porteria_data.empty else 'N/A'
                 
                 # --- Inferencia de Salida ---
                 salida_real_potencial = mejor_candidato['salida']
@@ -382,7 +395,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                         salida_fue_real = False
                     else:
                         salida_real = salida_real_potencial
-                        porteria_salida = grupo[grupo['FECHA_HORA'] == salida_real]['porteria'].iloc[0]
+                        # Buscar la portería de la salida
+                        porteria_data = grupo[grupo['FECHA_HORA'] == salida_real]
+                        porteria_salida = porteria_data['porteria'].iloc[0] if not porteria_data.empty else 'N/A'
                         estado_calculo = "Calculado"
                 else:
                     # Caso 2: No se encontró Salida Real Válida
@@ -471,7 +486,8 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
     df_filtrado = df_resultado.copy()
     rows_to_keep_indices = []
     
-    df_filtrado['FECHA_DATE'] = pd.to_datetime(df_filtrado['FECHA']).dt.date
+    # Se añade errors='coerce' a FECHA para seguridad
+    df_filtrado['FECHA_DATE'] = pd.to_datetime(df_filtrado['FECHA'], errors='coerce').dt.date
     df_filtrado['ENTRADA_DT'] = pd.to_datetime(df_filtrado['ENTRADA_REAL'], errors='coerce')
     df_filtrado['SALIDA_DT'] = pd.to_datetime(df_filtrado['SALIDA_REAL'], errors='coerce')
 
@@ -480,15 +496,16 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
     for id_trabajador, df_worker_group in df_filtrado.groupby('ID_TRABAJADOR'):
         
         df_worker = df_worker_group.sort_values(by='FECHA_DATE').copy()
-        unique_dates = df_worker['FECHA_DATE'].unique()
+        # Se filtra por FECHA_DATE != pd.NaT antes de buscar unique
+        valid_dates = df_worker.dropna(subset=['FECHA_DATE'])['FECHA_DATE'].unique()
         
-        if len(unique_dates) == 0:
+        if len(valid_dates) == 0:
             continue
             
-        first_day = unique_dates[0]
-        last_day = unique_dates[-1]
+        first_day = valid_dates[0]
+        last_day = valid_dates[-1]
 
-        for current_date in unique_dates:
+        for current_date in valid_dates:
             
             current_day_turnos = df_worker[df_worker['FECHA_DATE'] == current_date].copy()
             
@@ -722,7 +739,11 @@ if archivo_excel is not None:
                         if is_excessive_extra and col_name in ['Horas_Extra', 'Horas', 'Minutos']:
                             cell_format = red_extra_format
 
-                        worksheet.write(excel_row, col_idx, value if pd.notna(value) else 'N/A', cell_format)
+                        # Write must handle potential NaN/NaT values gracefully
+                        if pd.isna(value) or value == 'N/A' or value is None:
+                            worksheet.write(excel_row, col_idx, 'N/A', cell_format)
+                        else:
+                            worksheet.write(excel_row, col_idx, value, cell_format)
 
                 # Ajustar el ancho de las columnas
                 for i, col in enumerate(df_to_excel.columns):
@@ -746,12 +767,11 @@ if archivo_excel is not None:
         else:
             st.error(f"⚠️ ERROR: Faltan columnas requeridas o tienen nombres incorrectos: {e}")
     except Exception as e:
+        # Aquí es donde se captura el error reportado por el usuario.
         st.error(f"Error crítico al procesar el archivo: {e}. Por favor, verifica el formato de los datos.")
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
 
 
 
