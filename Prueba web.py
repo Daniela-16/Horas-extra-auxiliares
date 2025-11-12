@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 
 """
@@ -9,10 +8,8 @@ ahora sigue la siguiente prioridad estricta:
 1. Puesto de Trabajo: Se buscan entradas solo en Puestos de Trabajo.
 2. Portería: Si no hay entradas en Puestos de Trabajo, se buscan entradas en Porterías.
 3. Jornada Más Larga: Dentro del grupo de marcaciones priorizado, se selecciona la que
-   genere la jornada real (Entrada a Salida) más larga.
+    genere la jornada real (Entrada a Salida) más larga.
 
-El análisis de marcaciones para la asignación de Turnos (T1, T2, T3 vs T4)
-sigue priorizando T1/T2/T3 sobre T4.
 """
 
 import pandas as pd
@@ -38,7 +35,6 @@ TURNOS = {
     "LV": { # Lunes a Viernes (0-4)
         "Turno 1 LV": {"inicio": "05:40:00", "fin": "13:40:00", "duracion_hrs": 8},
         "Turno 2 LV": {"inicio": "13:40:00", "fin": "21:40:00", "duracion_hrs": 8},
-        "Turno 4 LV": {"inicio": "07:00:00", "fin": "17:00:00", "duracion_hrs": 10},
         # Turno nocturno: Inicia un día y termina al día siguiente
         "Turno 3 LV": {"inicio": "21:40:00", "fin": "05:40:00", "duracion_hrs": 8, "nocturno": True},
         
@@ -149,8 +145,7 @@ UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60
 
 def buscar_turnos_posibles(fecha_clave: datetime.date):
     """
-    Genera una lista de (nombre_turno, info, inicio_dt, fin_dt, fecha_clave_asignada, prioridad) para un día.
-    PRIORIDAD: 1 (Turnos 1, 2, 3), 2 (Turno 4).
+    Genera una lista de (nombre_turno, info, inicio_dt, fin_dt, fecha_clave_asignada) para un día.
     """
     dia_semana_clave = fecha_clave.weekday()
 
@@ -162,12 +157,8 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
     if tipo_dia in TURNOS:
         for nombre_turno, info_turno in TURNOS[tipo_dia].items():
             
-            # --- LÓGICA DE PRIORIDAD DE TURNO ---
-            # Asignamos prioridad 1 a T1, T2, T3. Prioridad 2 a T4.
-            prioridad = 1
-            if "Turno 4" in nombre_turno:
-                prioridad = 2
-
+            # La prioridad ya no es necesaria aquí, se asume prioridad 1 para todos los turnos restantes (T1, T2, T3)
+            
             hora_inicio = datetime.strptime(info_turno["inicio"], "%H:%M:%S").time()
             hora_fin = datetime.strptime(info_turno["fin"], "%H:%M:%S").time()
             es_nocturno = info_turno.get("nocturno", False)
@@ -179,16 +170,15 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
             else:
                 fin_posible_turno = datetime.combine(fecha_clave, hora_fin)
 
-            turnos_dia.append((nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave, prioridad))
+            turnos_dia.append((nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave))
             
-    # Ordenamos: Primero prioridad 1 (T1, T2, T3), luego prioridad 2 (T4)
-    return sorted(turnos_dia, key=lambda x: x[5]) 
+    # No es necesario ordenar por prioridad ya que el Turno 4 fue eliminado.
+    return turnos_dia
 
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date):
     """
-    Busca el turno programado más cercano a la marcación de entrada.
-    Aplica una LÓGICA DE PRIORIZACIÓN DE TURNOS (T1, T2, T3 sobre T4)
-    y luego usa la menor distancia absoluta a la hora de inicio programada.
+    Busca el turno programado más cercano a la marcación de entrada (T1, T2, T3).
+    Usa la menor distancia absoluta a la hora de inicio programada.
     
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
@@ -196,9 +186,6 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     mejor_turno_data_general = (None, None, None, None, None) 
     mejor_distancia_general = timedelta.max
     
-    mejor_turno_data_prioritario = (None, None, None, None, None)
-    mejor_distancia_prioritario = timedelta.max
-
     # --- 1. Generar Candidatos de Turno (Día X y Día X-1) ---
     turnos_candidatos = buscar_turnos_posibles(fecha_clave_turno_reporte)
     hora_evento = fecha_hora_evento.time()
@@ -207,10 +194,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
         fecha_clave_anterior = fecha_clave_turno_reporte - timedelta(days=1)
         turnos_candidatos.extend(buscar_turnos_posibles(fecha_clave_anterior))
 
-    turnos_candidatos = sorted(turnos_candidatos, key=lambda x: x[5])
-    
     # --- 2. Iterar y Evaluar ---
-    for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada, prioridad in turnos_candidatos:
+    for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
         es_nocturno = info_turno.get("nocturno", False)
         
@@ -228,26 +213,16 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
             distancia_a_inicio = abs(fecha_hora_evento - inicio_posible_turno)
             current_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
 
-            if prioridad == 1:
-                # Almacenar el mejor T1/T2/T3 encontrado (el más cercano)
-                if mejor_turno_data_prioritario[0] is None or distancia_a_inicio < mejor_distancia_prioritario:
-                    mejor_distancia_prioritario = distancia_a_inicio
-                    mejor_turno_data_prioritario = current_turno_data
-            
-            # Almacenar el mejor turno general (el más cercano, sea T1/2/3 o T4)
+            # Almacenar el mejor turno encontrado (el más cercano)
             if mejor_turno_data_general[0] is None or distancia_a_inicio < mejor_distancia_general:
                 mejor_distancia_general = distancia_a_inicio
                 mejor_turno_data_general = current_turno_data
 
 
-    # --- 3. Decisión Final: Priorizar T1/T2/T3 ---
-    if mejor_turno_data_prioritario[0] is not None:
-        return mejor_turno_data_prioritario
-    
-    # Si no hubo un match T1/T2/T3, pero sí hubo un match T4 (el mejor general)
-    elif mejor_turno_data_general[0] is not None:
-          return mejor_turno_data_general
-          
+    # --- 3. Decisión Final: Retornar el mejor (único grupo) ---
+    if mejor_turno_data_general[0] is not None:
+         return mejor_turno_data_general
+            
     return (None, None, None, None, None)
 
 # --- 4. Calculo de horas (Lógica modificada para incluir Prioridad de Marcación) ---
@@ -323,7 +298,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             for entrada_row in candidatos_a_evaluar_df.itertuples():
                 current_entry_time = entrada_row.FECHA_HORA
                 
-                # Esta función implementa la prioridad T1/T2/T3 sobre T4
+                # Esta función ya no tiene lógica de prioridad T1/T2/T3 sobre T4
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 
                 if turno_data[0] is not None:
@@ -365,12 +340,12 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                             mejor_entrada_para_turno = current_entry_time
                             mejor_turno_data = turno_data
                     
-                    # Caso de contingencia: Si no hay candidatos aún, y esta es la única posibilidad, se toma.
-                    elif mejor_turno_data[0] is None:
-                        mejor_distancia_a_inicio = distancia
-                        max_duracion_real = duracion_real_potencial
-                        mejor_entrada_para_turno = current_entry_time
-                        mejor_turno_data = turno_data
+                        # Caso de contingencia: Si no hay candidatos aún, y esta es la única posibilidad, se toma.
+                        elif mejor_turno_data[0] is None:
+                            mejor_distancia_a_inicio = distancia
+                            max_duracion_real = duracion_real_potencial
+                            mejor_entrada_para_turno = current_entry_time
+                            mejor_turno_data = turno_data
 
 
         # --- C. Asignación y Cálculo Final (El resto del código se mantiene) ---
@@ -771,7 +746,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
-
 
