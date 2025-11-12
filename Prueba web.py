@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 
 """
@@ -5,9 +6,13 @@ Calculadora de Horas Extra.
 
 CORRECCIÓN CLAVE: La asignación de entradas (Marcación de inicio de jornada)
 ahora sigue la siguiente prioridad estricta:
-1. MAXIMIZAR la Duración de la Jornada Real (Entrada a Salida).
-2. MINIMIZAR la Distancia de la Entrada al Inicio del Turno Programado. (Soluciona casos de confusión de turnos/llegada tarde)
-3. Desempate por Ubicación: Si Duración y Distancia son iguales, se prefiere Puesto de Trabajo > Portería.
+1. Puesto de Trabajo: Se buscan entradas solo en Puestos de Trabajo.
+2. Portería: Si no hay entradas en Puestos de Trabajo, se buscan entradas en Porterías.
+3. Jornada Más Larga: Dentro del grupo de marcaciones priorizado, se selecciona la que
+   genere la jornada real (Entrada a Salida) más larga.
+
+El análisis de marcaciones para la asignación de Turnos (T1, T2, T3 vs T4)
+sigue priorizando T1/T2/T3 sobre T4.
 """
 
 import pandas as pd
@@ -138,7 +143,7 @@ TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360 # 6 horas de adelanto
 TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 # 3 horas de margen para la asignación
 UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
-UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60  
+UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
 # --- 3. Obtener turno basado en fecha y hora ---
 
@@ -177,7 +182,7 @@ def buscar_turnos_posibles(fecha_clave: datetime.date):
             turnos_dia.append((nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave, prioridad))
             
     # Ordenamos: Primero prioridad 1 (T1, T2, T3), luego prioridad 2 (T4)
-    return sorted(turnos_dia, key=lambda x: x[5])  
+    return sorted(turnos_dia, key=lambda x: x[5]) 
 
 def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_reporte: datetime.date):
     """
@@ -241,8 +246,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     
     # Si no hubo un match T1/T2/T3, pero sí hubo un match T4 (el mejor general)
     elif mejor_turno_data_general[0] is not None:
-        return mejor_turno_data_general
-        
+          return mejor_turno_data_general
+          
     return (None, None, None, None, None)
 
 # --- 4. Calculo de horas (Lógica modificada para incluir Prioridad de Marcación) ---
@@ -250,7 +255,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: list, tolerancia_llegada_tarde: int):
     """
     Agrupa por ID y FECHA_CLAVE_TURNO.
-    Aplica la prioridad de selección de entrada: Duración > Proximidad a Turno > Ubicación.
+    Aplica la prioridad: 1. Puesto de Trabajo > 2. Portería > 3. Jornada más larga.
     """
     
     df_filtrado = df[(df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
@@ -263,10 +268,9 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
     for (id_trabajador, fecha_clave_turno), grupo in df_filtrado.groupby(['id_trabajador', 'FECHA_CLAVE_TURNO']):
 
         nombre = grupo['nombre'].iloc[0]
-        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent'].copy()
-        salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'].copy() 
+        entradas = grupo[grupo['TIPO_MARCACION'] == 'ent']
+        salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] 
         
-        # Inicialización de resultados
         entrada_real = pd.NaT
         porteria_entrada = 'N/A'
         salida_real = pd.NaT
@@ -279,40 +283,53 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         salida_fue_real = False 
         es_nocturno_flag = False 
         
-        # Variables de optimización y selección de la mejor entrada
+        # Variables de prioridad de asignación
         mejor_entrada_para_turno = pd.NaT
         mejor_turno_data = (None, None, None, None, None)
-        max_duracion_real = timedelta(seconds=0) # Prioridad 1: Maximizar duración
-        min_distancia_a_inicio = timedelta.max # Prioridad 2: Minimizar distancia
-        tipo_marcacion_priorizada = 'N/A' 
+        mejor_distancia_a_inicio = timedelta.max
+        max_duracion_real = timedelta(seconds=0) 
+        tipo_marcacion_priorizada = 'N/A' # Nuevo campo para el reporte
+
+        # --- A. Lógica de Priorización de Entradas (MODIFICADA: Puesto > Portería) ---
         
-        # --- A. Preparar todos los candidatos de entrada y su prioridad de ubicación ---
+        # 1. Filtro de entradas por Puesto de Trabajo (PRIORIDAD 1)
+        entradas_puesto = entradas[
+            entradas['PORTERIA_NORMALIZADA'].isin(lugares_puesto)
+        ].sort_values(by='FECHA_HORA')
         
-        entradas['PRIORIDAD_UBICACION'] = np.where(
-            entradas['PORTERIA_NORMALIZADA'].isin(lugares_puesto), 1, 
-            np.where(entradas['PORTERIA_NORMALIZADA'].isin(lugares_porteria), 2, 99)
-        )
-        # Solo se evalúan entradas de Puesto o Portería
-        candidatos_a_evaluar_df = entradas[entradas['PRIORIDAD_UBICACION'].isin([1, 2])].sort_values(by='FECHA_HORA')
+        # 2. Filtro de entradas por Portería (PRIORIDAD 2)
+        entradas_porteria = entradas[
+            entradas['PORTERIA_NORMALIZADA'].isin(lugares_porteria)
+        ].sort_values(by='FECHA_HORA')
         
-        if candidatos_a_evaluar_df.empty:
-            estado_calculo = "Turno No Asignado (No hay entradas válidas en Puesto/Portería)"
-            # Se añade un resultado vacío para el reporte si es el único registro
-            # o si se procesa el resto del ciclo (aunque aquí el cálculo se salta).
-            pass
+        candidatos_a_evaluar_df = pd.DataFrame()
+
+        if not entradas_puesto.empty:
+            # PRIORIDAD MÁXIMA: Puestos de Trabajo
+            candidatos_a_evaluar_df = entradas_puesto
+            tipo_marcacion_priorizada = "Puesto de Trabajo"
+        elif not entradas_porteria.empty:
+            # SEGUNDA PRIORIDAD: Porterías
+            candidatos_a_evaluar_df = entradas_porteria
+            tipo_marcacion_priorizada = "Portería"
         else:
-            # --- B. Iterar sobre todos los candidatos válidos para encontrar la mejor jornada (Duración y Proximidad) ---
+            # Si no hay candidatos, el loop principal de la jornada continúa con la fila vacía
+            estado_calculo = "Turno No Asignado (No hay entradas válidas en Puesto/Portería)"
+            # Se añade un resultado vacío para el reporte
+            pass 
+
+        # Solo si hay candidatos en el grupo priorizado, se procede a la lógica de jornada más larga
+        if not candidatos_a_evaluar_df.empty:
             for entrada_row in candidatos_a_evaluar_df.itertuples():
                 current_entry_time = entrada_row.FECHA_HORA
-                current_location_priority = entrada_row.PRIORIDAD_UBICACION
                 
-                # Asigna el turno que mejor se ajusta a esta marcación (Lógica T1/T2/T3 sobre T4)
+                # Esta función implementa la prioridad T1/T2/T3 sobre T4
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 
                 if turno_data[0] is not None:
                     inicio_programado = turno_data[2]
                     fin_programado = turno_data[3]
-                    distancia_a_inicio = abs(current_entry_time - inicio_programado)
+                    distancia = abs(current_entry_time - inicio_programado)
 
                     # 1. Determinar la salida real potencial para esta entrada
                     max_salida_aceptable = fin_programado + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
@@ -329,43 +346,34 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                         duracion_real_potencial = salida_potencial - current_entry_time
                     
                     
-                    # 2. Criterio de Selección (Duración > Proximidad > Ubicación)
+                    # 2. Criterio de Selección COMBINADO (Turno más largo Y más cercano)
                     
-                    # Criterio 1: Debe durar más que el mejor encontrado hasta ahora
-                    if duracion_real_potencial > max_duracion_real:
-                        
-                        max_duracion_real = duracion_real_potencial
-                        min_distancia_a_inicio = distancia_a_inicio
-                        mejor_entrada_para_turno = current_entry_time
-                        mejor_turno_data = turno_data
-                        tipo_marcacion_priorizada = "Puesto de Trabajo" if current_location_priority == 1 else "Portería"
-                        
-                    # Criterio 2: Si tienen duraciones iguales, se prefiere la más cercana al inicio programado
-                    elif duracion_real_potencial == max_duracion_real:
-                        
-                        if distancia_a_inicio < min_distancia_a_inicio:
-                            min_distancia_a_inicio = distancia_a_inicio
-                            mejor_entrada_para_turno = current_entry_time
-                            mejor_turno_data = turno_data
-                            tipo_marcacion_priorizada = "Puesto de Trabajo" if current_location_priority == 1 else "Portería"
+                    # REGLA 1: La entrada debe estar dentro de la tolerancia de distancia.
+                    if distancia < timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS + 5):
+                    
+                        # Si la nueva jornada es significativamente más larga (PRIORIDAD 1)
+                        if duracion_real_potencial > max_duracion_real:
                             
-                        # Criterio 3: Si Duración y Distancia son iguales, se prefiere la de Puesto de Trabajo (menor prioridad_ubicacion)
-                        elif distancia_a_inicio == min_distancia_a_inicio and current_location_priority < (1 if tipo_marcacion_priorizada == "Puesto de Trabajo" else 2):
-                            # Esto es un desempate estricto, no debería cambiar max_duracion o min_distancia
+                            max_duracion_real = duracion_real_potencial
+                            mejor_distancia_a_inicio = distancia
                             mejor_entrada_para_turno = current_entry_time
                             mejor_turno_data = turno_data
-                            tipo_marcacion_priorizada = "Puesto de Trabajo" if current_location_priority == 1 else "Portería"
+                            
+                        # Si tienen duraciones iguales, se prefiere la más cercana al inicio programado (PRIORIDAD 2)
+                        elif duracion_real_potencial == max_duracion_real and distancia < mejor_distancia_a_inicio:
+                            mejor_distancia_a_inicio = distancia
+                            mejor_entrada_para_turno = current_entry_time
+                            mejor_turno_data = turno_data
                     
                     # Caso de contingencia: Si no hay candidatos aún, y esta es la única posibilidad, se toma.
                     elif mejor_turno_data[0] is None:
+                        mejor_distancia_a_inicio = distancia
                         max_duracion_real = duracion_real_potencial
-                        min_distancia_a_inicio = distancia_a_inicio
                         mejor_entrada_para_turno = current_entry_time
                         mejor_turno_data = turno_data
-                        tipo_marcacion_priorizada = "Puesto de Trabajo" if current_location_priority == 1 else "Portería"
 
 
-        # --- C. Asignación y Cálculo Final ---
+        # --- C. Asignación y Cálculo Final (El resto del código se mantiene) ---
         if pd.notna(mejor_entrada_para_turno):
             entrada_real = mejor_entrada_para_turno
             turno_nombre, info_turno, inicio_turno, fin_turno, fecha_clave_final = mejor_turno_data
@@ -466,7 +474,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag,
             'Estado_Calculo': estado_calculo,
             'Es_Nocturno': es_nocturno_flag,
-            'Tipo_Marcacion_Asignada': tipo_marcacion_priorizada # COLUMNA ACTUALIZADA
+            'Tipo_Marcacion_Asignada': tipo_marcacion_priorizada # Nuevo campo
         })
 
     return pd.DataFrame(resultados)
@@ -525,12 +533,7 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
                     (current_day_turnos['ENTRADA_DT'] <= limite_max_entrada)
                 ]
 
-                # Además, si es el primer día Y es un turno diurno (ej. T1, T2, T4), siempre se mantiene.
-                primer_dia_diurno_valido = current_day_turnos[
-                    (current_day_turnos['Es_Nocturno'] == False)
-                ]
-
-                if not primer_dia_nocturno_valido.empty or not primer_dia_diurno_valido.empty:
+                if not primer_dia_nocturno_valido.empty:
                     rows_to_keep_indices.extend(current_day_turnos.index.tolist())
             
             
@@ -545,14 +548,8 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
                     (current_day_turnos['SALIDA_DT'] >= limite_min_salida) &
                     (current_day_turnos['SALIDA_DT'] <= limite_max_salida)
                 ]
-                
-                # Además, si es el último día Y es un turno diurno (ej. T1, T2, T4), siempre se mantiene.
-                ultimo_dia_diurno_valido = current_day_turnos[
-                    (current_day_turnos['Es_Nocturno'] == False)
-                ]
 
-
-                if not ultimo_dia_nocturno_valido.empty or not ultimo_dia_diurno_valido.empty:
+                if not ultimo_dia_nocturno_valido.empty:
                     rows_to_keep_indices.extend(current_day_turnos.index.tolist())
 
 
@@ -566,8 +563,8 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
 
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
-st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40) O si son turnos diurnos.")
-st.caption("La asignación de entrada ahora prioriza la marcación que mejor se ajusta al turno (Duración Máx. > Proximidad Mín.) y usa la ubicación (**Puesto de Trabajo** > **Portería**) solo como desempate final.")
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
+st.caption("La asignación de entrada ahora prioriza la marcación de **Puesto de Trabajo** sobre **Portería**. Dentro de la marcación priorizada, se elige la jornada con la **mayor duración real**.")
 
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
@@ -666,7 +663,7 @@ if archivo_excel is not None:
         
         # Filtrado Final del dataset crudo
         df_raw_filtrado = df_raw[
-            (df_raw['PORTERIA_NORMALIZADA'].isin(LUGARES_COMBINADOS_NORMALIZADOS)) &  
+            (df_raw['PORTERIA_NORMALIZADA'].isin(LUGARES_COMBINADOS_NORMALIZADOS)) & 
             (df_raw['TIPO_MARCACION'].isin(['ent', 'sal']))
         ].copy()
 
@@ -674,9 +671,9 @@ if archivo_excel is not None:
 
         # --- Ejecutar el Cálculo ---
         df_resultado = calcular_turnos(
-            df_raw_filtrado,  
-            LUGARES_PUESTO_TRABAJO_NORMALIZADOS,  
-            LUGARES_PORTERIA_NORMALIZADOS,  
+            df_raw_filtrado, 
+            LUGARES_PUESTO_TRABAJO_NORMALIZADOS, 
+            LUGARES_PORTERIA_NORMALIZADOS, 
             TOLERANCIA_LLEGADA_TARDE_MINUTOS
         )
 
