@@ -1,3 +1,26 @@
+# -*- coding: utf-8 -*-
+
+"""
+Calculadora de Horas Extra.
+
+CORRECCIÓN CLAVE: La asignación de entradas (Marcación de inicio de jornada)
+ahora sigue la siguiente prioridad estricta:
+1. Puesto de Trabajo: Se buscan entradas solo en Puestos de Trabajo.
+2. Portería: Si no hay entradas en Puestos de Trabajo, se buscan entradas en Porterías.
+3. PRIMERA ENTRADA VÁLIDA (DINÁMICA): Dentro del grupo de marcaciones priorizado, se selecciona la
+   PRIMERA marcación cronológica que puede ser asignada a un turno (T1, T2 o T3).
+   
+   **FILTRO DINÁMICO DE DESPLAZAMIENTO MEJORADO:** Si la jornada actual ya tiene una entrada de Turno 3
+   (Rango ampliado: **20:00 - 23:59**), cualquier marcación de entrada anterior a las 05:40 AM (que no sea la propia
+   entrada de T3) se considera un desplazamiento y se ignora para el inicio de jornada.
+   
+   **LÓGICA DE AGRUPACIÓN (FECHA CLAVE):**
+   - El corte para entradas (ENT) se mueve a **03:00:00 AM** para permitir un margen amplio
+     de horas extras del Turno 1 (05:40) en su fecha correcta.
+   - Las entradas antes de las 03:00 AM se agrupan con el día anterior (Turno 3 residual).
+
+"""
+
 import pandas as pd
 from datetime import datetime, timedelta
 import streamlit as st
@@ -281,21 +304,23 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             
             # 1. Definir ventanas de chequeo
             t1_start_time = datetime.strptime(TURNOS['LV']['Turno 1 LV']['inicio'], "%H:%M:%S").time() # 05:40:00
-            t3_start_min = datetime.strptime("21:00:00", "%H:%M:%S").time()
+            
+            # RANGO DE BÚSQUEDA T3 AMPLIADO
+            t3_start_min = datetime.strptime("20:00:00", "%H:%M:%S").time() # Inicio de búsqueda a las 20:00
             t3_start_max = datetime.strptime("23:59:59", "%H:%M:%S").time()
             
-            # 2. Condición: La primera entrada es de madrugada (antes de T1) Y NO es el inicio de T3.
-            is_early_morning_entry = first_entry_hour < t1_start_time and first_entry_hour < t3_start_min
+            # 2. Condición: La primera entrada es de madrugada (antes de T1).
+            is_early_morning_entry = first_entry_hour < t1_start_time and first_entry_time.date() == fecha_clave_turno
             
             if is_early_morning_entry:
-                # 3. Verificar si el Turno 3 (21:00-23:59) se activó en esta jornada (FECHA_CLAVE_TURNO)
+                # 3. Verificar si el Turno 3 (20:00-23:59) se activó en esta jornada (FECHA_CLAVE_TURNO)
                 t3_start_found = entradas[
                     (entradas['FECHA_HORA'].dt.date == fecha_clave_turno) & 
                     (entradas['FECHA_HORA'].dt.time >= t3_start_min) & 
                     (entradas['FECHA_HORA'].dt.time <= t3_start_max)
                 ]
                 
-                # Si se encontró una entrada T3 (21:00) Y la primera entrada actual es de madrugada: 
+                # Si se encontró una entrada T3 (20:00-23:59) Y la primera entrada actual es de madrugada: 
                 # -> Es un desplazamiento intermedio. La eliminamos de los candidatos.
                 if not t3_start_found.empty:
                     candidatos_a_evaluar_df = candidatos_a_evaluar_df.iloc[1:].copy()
