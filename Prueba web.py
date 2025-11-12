@@ -3,11 +3,14 @@
 """
 Calculadora de Horas Extra.
 
-AJUSTE CRÍTICO: Se refina la lógica de selección de entrada para priorizar:
-1. Jornadas con SALIDA REAL marcada.
-2. Jornadas con la MAYOR DURACIÓN REAL.
-Esto evita que las duraciones "asumidas" (por falta de marcación de salida) generen falsos ganadores
-y corrijan marcaciones intermedias como la de las 04:50 AM.
+VERSIÓN FINAL CON AJUSTES UNIVERSALES DE ASIGNACIÓN:
+1. Priorización de la Marcación: Puesto de Trabajo > Portería.
+2. Criterio de Selección de Entrada: 
+   - Prioridad 1: Jornadas con SALIDA REAL marcada.
+   - Prioridad 2: Jornadas con la MAYOR DURACIÓN REAL (para asumir la jornada completa).
+   - Prioridad 3: DISTANCIA MÍNIMA al inicio programado (desempate).
+3. Ventana Estricta para TODOS los Turnos: La asignación de T1 y T2 solo permite entradas 
+   muy cercanas (10 min) al inicio programado, eliminando marcaciones intermedias.
 """
 
 import pandas as pd
@@ -133,8 +136,8 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
 # --- CONSTANTES DE TOLERANCIA ---
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40 # Se mantiene para el cálculo de penalidad/horas netas
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 90 # AJUSTADA: 1.5 horas de adelanto (Evita solapamiento con T3)
-TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 10 # AJUSTADA: Muy estricto para evitar desplazamientos como inicios de turno
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 90 # Se mantiene para T3 (21:40), pero se anula para T1/T2 en la lógica de asignación
+TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 10 # Muy estricto para evitar desplazamientos como inicios de turno
 UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
@@ -175,7 +178,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     Busca el turno programado más cercano a la marcación de entrada, 
     usando ventanas de tolerancia estrictas.
     
-    Aplica la Regla de Prioridad Nocturna para marcaciones de madrugada.
+    Aplica la Regla de Prioridad Nocturna y la nueva regla de asignación estricta para T1/T2.
     
     Retorna: (nombre, info, inicio_turno, fin_turno, fecha_clave_final)
     """
@@ -187,7 +190,6 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     turnos_candidatos = buscar_turnos_posibles(fecha_clave_turno_reporte)
     hora_evento = fecha_hora_evento.time()
     
-    # Si la marcación es en la madrugada (antes del corte), también busca turnos del día anterior
     if hora_evento < HORA_CORTE_NOCTURNO:
         fecha_clave_anterior = fecha_clave_turno_reporte - timedelta(days=1)
         turnos_candidatos.extend(buscar_turnos_posibles(fecha_clave_anterior))
@@ -195,26 +197,30 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     # --- 2. Iterar y Evaluar ---
     for nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada in turnos_candidatos:
 
-        # 2.1. Definir rango de ventana de marcación (VENTANA AJUSTADA Y ESTRICTA)
-        rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
+        es_nocturno = info_turno.get("nocturno", False)
+        
+        # 2.1. Definir rango de ventana de marcación
         rango_fin_tarde = inicio_posible_turno + timedelta(minutes=TOLERANCIA_ASIGNACION_TARDE_MINUTOS)
         
-        # 2.2. Validar si la marcación cae en la ventana
+        if es_nocturno:
+            # T3 mantiene la ventana de adelanto (90 min) para capturar la entrada de 21:40
+            rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS)
+            
+            # Regla de prioridad nocturna: Si es candidato válido, lo seleccionamos inmediatamente
+            if fecha_hora_evento.time() < HORA_CORTE_NOCTURNO and fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
+                 return (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
+
+        else:
+            # Turnos diurnos (T1, T2): Solo se permite entrada muy cerca del inicio programado (10 min antes).
+            rango_inicio_temprano = inicio_posible_turno - timedelta(minutes=10) 
+            
+        
+        # 2.2. Validar si la marcación cae en la ventana (Aplica a T1/T2 y a los nocturnos si no se capturaron arriba)
         if fecha_hora_evento >= rango_inicio_temprano and fecha_hora_evento <= rango_fin_tarde:
             
-            es_nocturno = info_turno.get("nocturno", False)
-            
-            # 2.3. Lógica de Prioridad Nocturna Absoluta 
-            # Si el evento ocurre en la madrugada (< 08:00 AM) y el turno es nocturno, 
-            # lo seleccionamos inmediatamente para anular la cercanía al Turno 1 (05:40 AM).
-            if fecha_hora_evento.time() < HORA_CORTE_NOCTURNO and es_nocturno:
-                return (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
-
-
             distancia_a_inicio = abs(fecha_hora_evento - inicio_posible_turno)
             current_turno_data = (nombre_turno, info_turno, inicio_posible_turno, fin_posible_turno, fecha_clave_asignada)
 
-            # Almacenar el mejor turno (el más cercano a la hora de inicio programada)
             if mejor_turno_data[0] is None or distancia_a_inicio < mejor_distancia:
                 mejor_distancia = distancia_a_inicio
                 mejor_turno_data = current_turno_data
@@ -322,7 +328,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                         'DISTANCIA': distancia,
                         'DURACION_REAL': duracion_real_potencial,
                         'SALIDA_POTENCIAL': salida_potencial,
-                        'SALIDA_ES_REAL': salida_es_real # NUEVO CAMPO CRÍTICO
+                        'SALIDA_ES_REAL': salida_es_real
                     })
             
             # --- Criterio de Selección FINAL (Salida REAL > Duración Real > Distancia) ---
@@ -531,7 +537,7 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
 st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
-st.caption("La asignación de entrada ahora prioriza la marcación de **Puesto de Trabajo** sobre **Portería**, y dentro de ese grupo, se elige la entrada que tenga una **SALIDA REAL** marcada. Si ninguna tiene salida, se elige la de mayor duración asumida.")
+st.caption("La asignación de entrada ahora prioriza la marcación de **Puesto de Trabajo** sobre **Portería**, y dentro de ese grupo, se elige la entrada que tenga una **SALIDA REAL** marcada. Si ninguna tiene salida real, se elige la que genera la mayor duración asumida.")
 
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
