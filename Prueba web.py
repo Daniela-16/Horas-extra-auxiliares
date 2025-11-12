@@ -9,9 +9,6 @@ ahora sigue la siguiente prioridad estricta:
 2. Portería: Si no hay entradas en Puestos de Trabajo, se buscan entradas en Porterías.
 3. Jornada Más Larga: Dentro del grupo de marcaciones priorizado, se selecciona la que
     genere la jornada real (Entrada a Salida) más larga.
-
-El análisis de marcaciones para la asignación de Turnos (T1, T2, T3)
-sigue priorizando la menor distancia a la hora de inicio programada.
 """
 
 import pandas as pd
@@ -20,7 +17,7 @@ import streamlit as st
 import io
 import numpy as np
 
-# --- CÓDIGOS DE TRABAJADORES PERMITIDOS (ACTUALIZADO) ---
+# --- CÓDIGOS DE TRABAJADORES PERMITIDOS  ---
 # Se filtra el DataFrame de entrada para incluir SOLAMENTE los registros con estos ID.
 CODIGOS_TRABAJADORES_FILTRO = [
     81169, 82911, 81515, 81744, 82728, 83617, 81594, 81215, 79114, 80531,
@@ -137,10 +134,10 @@ HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
 
 # --- CONSTANTES DE TOLERANCIA ---
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
-TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 360 # 6 horas de adelanto
+TOLERANCIA_ENTRADA_TEMPRANA_MINUTOS = 120 # 2 horas de adelanto
 TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 # 3 horas de margen para la asignación
 UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
-MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
+MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 6
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
 # --- 3. Obtener turno basado en fecha y hora ---
@@ -745,4 +742,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
