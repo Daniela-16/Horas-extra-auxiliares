@@ -213,7 +213,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
     """
     Agrupa por ID y FECHA_CLAVE_TURNO.
     Aplica la nueva lógica de prioridad: Asignar al turno programado más temprano
-    que tenga una entrada válida asociada (Puesto o Portería).
+    que tenga una entrada válida asociada (Puesto o Portería), luego la entrada real más temprana.
     """
     
     df_filtrado = df[(df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
@@ -262,25 +262,25 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 candidatos_con_turno.append({
                     'entrada_real': current_entry_time,
                     'turno_data': turno_data,
-                    'inicio_turno_programado': turno_data[2], # inicio_turno
+                    'inicio_turno_programado': turno_data[2], # inicio_turno (datetime)
                     'tipo_marcacion_priorizada': tipo_prioridad,
                     'porteria': entrada_row.porteria,
                 })
 
-        # 2. Selección Final: Priorizar el Turno Programado más Temprano y luego Puesto
+        # 2. Selección Final: Priorizar el Turno Programado más Temprano y luego la Entrada Real más temprana
         if candidatos_con_turno:
             
             candidatos_df = pd.DataFrame(candidatos_con_turno)
             
             # Clave de ordenamiento: 
             # 1. Inicio de Turno Programado (min) -> Para favorecer T1 (05:40) sobre T2 (13:40).
-            # 2. Tipo de Prioridad (Puesto=0, Portería=1) -> Para desempatar si el turno es el mismo.
-            # 3. Hora de Entrada Real (min) -> Para desempatar el resto.
+            # 2. Hora de Entrada Real (min) -> Para favorecer la entrada real más temprana para ese turno.
+            # 3. Tipo de Prioridad (Puesto=0, Portería=1) -> Para desempate final.
             
             def custom_sort_key(row):
                 key1 = row['inicio_turno_programado']
-                key2 = 0 if row['tipo_marcacion_priorizada'] == "Puesto de Trabajo" else 1
-                key3 = row['entrada_real']
+                key2 = row['entrada_real']
+                key3 = 0 if row['tipo_marcacion_priorizada'] == "Puesto de Trabajo" else 1
                 return (key1, key2, key3)
                 
             candidatos_df['sort_key'] = candidatos_df.apply(custom_sort_key, axis=1)
@@ -489,7 +489,7 @@ def asignar_fecha_clave_turno_corregida(row):
     if tipo_marcacion == 'ent':
         if hora_marcacion < HORA_INICIO_T1: # Antes de 05:40:00
             
-            # **NUEVA LÓGICA DE AGREGACIÓN**
+            # **LÓGICA DE AGREGACIÓN**
             # Verifica si hay una entrada nocturna el día anterior.
             if row.get('Entrada_Nocturna_Dia_Anterior', False):
                     # Si la hay, es la continuidad del T3/desplazamiento. Agrupar al DÍA ANTERIOR.
@@ -513,7 +513,7 @@ def asignar_fecha_clave_turno_corregida(row):
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
 st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
-st.caption("La asignación de entrada ahora prioriza el **TURNO PROGRAMADO MÁS TEMPRANO** que tenga una marcación válida (Portería o Puesto de Trabajo), corrigiendo problemas donde una entrada tardía de Puesto tomaba un turno posterior (ej. T2) ignorando una entrada temprana de Portería que apuntaba a un turno anterior (ej. T1).")
+st.caption("La asignación de entrada ahora prioriza el **TURNO PROGRAMADO MÁS TEMPRANO** y, en caso de empate, la **entrada real más temprana**, corrigiendo la asignación de turnos posteriores por marcaciones tardías de puesto.")
 
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
@@ -744,6 +744,4 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
-
-
 
