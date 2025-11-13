@@ -283,13 +283,13 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                     
                     # 4. Criterio de Selección:
                     # Elige la marcación que tiene la menor distancia al inicio del turno.
-                    # Si las distancias son iguales, usa la de mayor prioridad (Puesto < Portería).
                     is_closer = distancia_a_inicio < mejor_distancia_total
                     
                     # Desempate: Si la distancia es la misma, la prioridad 1 (Puesto) gana sobre la 2 (Portería)
+                    # Nota: El uso de `mejor_turno_data[0].split()[0]` es inseguro, se simplifica el desempate por la prioridad numérica
                     is_equal_but_higher_priority = (
                         distancia_a_inicio == mejor_distancia_total and 
-                        current_prioridad < (mejor_turno_data[0].split()[0] == "Puesto" if mejor_turno_data[0] else 3)
+                        current_prioridad < (1 if tipo_marcacion_priorizada == "Puesto de Trabajo" else 2) # Puesto (1) < Porteria (2)
                     )
                     
                     if mejor_turno_data[0] is None or is_closer or is_equal_but_higher_priority:
@@ -603,7 +603,7 @@ if archivo_excel is not None:
         df_raw['PORTERIA_NORMALIZADA'] = df_raw['porteria'].astype(str).str.strip().str.lower()
         df_raw['TIPO_MARCACION'] = df_raw['puntomarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
 
-        # --- CÁLCULO DE ENTRADAS NOCTURNAS DEL DÍA ANTERIOR (NUEVO BLOQUE) ---
+        # --- CÁLCULO DE ENTRADAS NOCTURNAS DEL DÍA ANTERIOR (BLOQUE EXISTENTE) ---
         
         # 1. Definir el rango nocturno (21:00:00 a 23:59:59)
         hora_inicio_noche = datetime.strptime("21:00:00", "%H:%M:%S").time()
@@ -620,7 +620,6 @@ if archivo_excel is not None:
         df_entradas_nocturnas['FECHA_AFECTADA'] = df_entradas_nocturnas['FECHA_HORA'].dt.normalize() + timedelta(days=1)
         
         # 4. Crear el DataFrame de *flags* para la unión
-        # Agrupa para asegurar que solo una entrada nocturna por trabajador/día afectado sea suficiente
         df_nocturno_flag = df_entradas_nocturnas.groupby(['id_trabajador', 'FECHA_AFECTADA']).size().reset_index(name='COUNT')
         df_nocturno_flag['Entrada_Nocturna_Dia_Anterior'] = True
         df_nocturno_flag.drop(columns='COUNT', inplace=True)
@@ -681,10 +680,18 @@ if archivo_excel is not None:
             st.subheader("Resultados de las Horas Extra")
             st.dataframe(df_resultado_filtrado[columnas_reporte], use_container_width=True)
 
-            # --- Lógica de descarga en Excel con formato condicional ---
+            # --- Lógica de descarga en Excel con formato condicional (CORREGIDA) ---
             buffer_excel = io.BytesIO()
             with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
                 df_to_excel = df_resultado_filtrado[columnas_reporte].copy()
+                
+                # CRUCIAL: Reemplazar valores no válidos (NaT, NaN) por cadena 'N/A' antes de escribir el DF
+                df_to_excel['ENTRADA_REAL'] = df_to_excel['ENTRADA_REAL'].replace('N/A', pd.NA).fillna('N/A')
+                df_to_excel['SALIDA_REAL'] = df_to_excel['SALIDA_REAL'].replace('N/A', pd.NA).fillna('N/A')
+                df_to_excel['Inicio_Turno_Programado'] = df_to_excel['Inicio_Turno_Programado'].replace('N/A', pd.NA).fillna('N/A')
+                df_to_excel['Fin_Turno_Programado'] = df_to_excel['Fin_Turno_Programado'].replace('N/A', pd.NA).fillna('N/A')
+
+
                 df_to_excel.to_excel(writer, sheet_name='Reporte Horas Extra', index=False)
 
                 workbook = writer.book
@@ -701,9 +708,11 @@ if archivo_excel is not None:
                     max_len = max(df_to_excel[col].astype(str).str.len().max() if not df_to_excel[col].empty else len(col), len(col)) + 2
                     worksheet.set_column(i, i, max_len)
 
-                # Aplicación de formatos condicionales
+
+                # Aplicación de formatos condicionales celda por celda (CORREGIDA LA ESCRITURA)
                 for row_num, row in df_resultado_filtrado.iterrows():
                     try:
+                        # Obtiene la fila real en la hoja de Excel (+1 por la cabecera)
                         excel_row = df_to_excel.index.get_loc(row_num) + 1  
                     except KeyError:
                         continue
@@ -720,7 +729,8 @@ if archivo_excel is not None:
                         base_format = yellow_format
 
                     for col_idx, col_name in enumerate(df_to_excel.columns):
-                        value = row[col_name]
+                        # Leer el valor ya limpio (sin NaT) del DataFrame escrito
+                        value = df_to_excel.iloc[excel_row - 1][col_name] 
                         cell_format = base_format  
                         
                         if col_name == 'ENTRADA_REAL' and is_late:
@@ -729,13 +739,13 @@ if archivo_excel is not None:
                         if is_excessive_extra and col_name in ['Horas_Extra', 'Horas', 'Minutos']:
                             cell_format = red_extra_format
 
-                        # Si el valor es una fecha/hora, debe escribirse como tal para que Excel lo reconozca
-                        if isinstance(value, str) and (col_name in ['ENTRADA_REAL', 'SALIDA_REAL']):
-                            worksheet.write_string(excel_row, col_idx, value, cell_format)
-                        elif pd.isna(value) or value == 'N/A':
-                            worksheet.write_string(excel_row, col_idx, 'N/A', cell_format)
+                        # LÓGICA DE ESCRITURA SEGURA:
+                        # Si el valor es una cadena (incluyendo 'N/A'), usar write_string.
+                        if isinstance(value, str):
+                             worksheet.write_string(excel_row, col_idx, value, cell_format)
+                        # Para números (incluyendo 0s), usar write.
                         else:
-                            worksheet.write(excel_row, col_idx, value, cell_format)
+                             worksheet.write(excel_row, col_idx, value, cell_format)
 
                 buffer_excel.seek(0)
 
@@ -758,5 +768,6 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
 
