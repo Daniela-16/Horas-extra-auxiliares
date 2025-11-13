@@ -583,7 +583,7 @@ if archivo_excel is not None:
         df_raw['PORTERIA_NORMALIZADA'] = df_raw['porteria'].astype(str).str.strip().str.lower()
         df_raw['TIPO_MARCACION'] = df_raw['puntomarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
 
-        # --- CÁLCULO DE ENTRADAS NOCTURNAS DEL DÍA ANTERIOR ---
+        # --- CÁLCULO DE ENTRADAS NOCTURNAS DEL DÍA ANTERIOR (NUEVO BLOQUE) ---
         
         # 1. Definir el rango nocturno de entrada (21:00:00 a 23:59:59)
         hora_inicio_noche = datetime.strptime("21:00:00", "%H:%M:%S").time()
