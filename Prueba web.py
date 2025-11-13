@@ -117,7 +117,8 @@ LUGARES_COMBINADOS_NORMALIZADOS = LUGARES_PUESTO_TRABAJO_NORMALIZADOS + LUGARES_
 
 
 MAX_EXCESO_SALIDA_HRS = 3
-HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time()
+HORA_CORTE_NOCTURNO = datetime.strptime("08:00:00", "%H:%M:%S").time() # Para Salidas y agrupamiento
+HORA_INICIO_T1 = datetime.strptime(TURNOS['LV']['Turno 1 LV']['inicio'], "%H:%M:%S").time() # 05:40:00 - Para Entradas y agrupamiento
 
 # --- CONSTANTES DE TOLERANCIA ---
 TOLERANCIA_LLEGADA_TARDE_MINUTOS = 40
@@ -126,7 +127,7 @@ TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 # 3 horas de margen para la asignació
 UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
-HORA_INICIO_T1 = datetime.strptime(TURNOS['LV']['Turno 1 LV']['inicio'], "%H:%M:%S").time() # 05:40:00
+
 
 # --- 3. Obtener turno basado en fecha y hora ---
 
@@ -174,6 +175,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     turnos_candidatos = buscar_turnos_posibles(fecha_clave_turno_reporte)
     hora_evento = fecha_hora_evento.time()
     
+    # Si la hora de la marcación es antes del corte nocturno (08:00:00 AM), 
+    # también considera los turnos del día anterior para el T3 nocturno.
     if hora_evento < HORA_CORTE_NOCTURNO:
         fecha_clave_anterior = fecha_clave_turno_reporte - timedelta(days=1)
         turnos_candidatos.extend(buscar_turnos_posibles(fecha_clave_anterior))
@@ -210,7 +213,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
     """
     Agrupa por ID y FECHA_CLAVE_TURNO.
     Aplica la prioridad: 1. Puesto de Trabajo > 2. Portería > 3. Primera Entrada Válida.
-    (El filtro dinámico de T3 ha sido eliminado para simplificar y evitar errores.)
     """
     
     df_filtrado = df[(df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
@@ -273,8 +275,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         
         if not candidatos_a_evaluar_df.empty:
             candidatos_a_evaluar_df = candidatos_a_evaluar_df.sort_values(by='FECHA_HORA')
-            
-            # El filtro dinámico ha sido ELIMINADO.
             
             for entrada_row in candidatos_a_evaluar_df.itertuples():
                 current_entry_time = entrada_row.FECHA_HORA
@@ -474,6 +474,36 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
     df_final.drop(columns=['Es_Nocturno', 'FECHA_DATE', 'ENTRADA_DT', 'SALIDA_DT'], inplace=True, errors='ignore')
     return df_final
 
+# --- Función para asignar Fecha Clave de Turno (CORREGIDA A REGLA ESTRICTA) ---
+def asignar_fecha_clave_turno_corregida(row):
+    """
+    Función de agrupamiento corregida, usando el flag 'Entrada_Nocturna_Dia_Anterior'.
+    """
+    fecha_original = row['FECHA_HORA'].date()
+    hora_marcacion = row['FECHA_HORA'].time()
+    tipo_marcacion = row['TIPO_MARCACION']
+    
+    if tipo_marcacion == 'ent':
+        if hora_marcacion < HORA_INICIO_T1: # Antes de 05:40:00
+            
+            # **NUEVA LÓGICA DE AGREGACIÓN**
+            # Verifica si hay una entrada nocturna el día anterior.
+            if row.get('Entrada_Nocturna_Dia_Anterior', False):
+                 # Si la hay, es la continuidad del T3/desplazamiento. Agrupar al DÍA ANTERIOR.
+                return fecha_original - timedelta(days=1)
+            else:
+                # Si no la hay, es una entrada temprana para T1. Agrupar al DÍA ACTUAL.
+                return fecha_original
+
+        # Entradas de 05:40:00 en adelante se consideran del día actual (T1/T2)
+        return fecha_original
+        
+    # Lógica existente para SALIDAS (Agrupa salidas antes de las 08:00 AM con el día anterior)
+    if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
+        return fecha_original - timedelta(days=1)
+        
+    return fecha_original
+
 
 # --- 6. Interfaz Streamlit ---
 
@@ -561,27 +591,42 @@ if archivo_excel is not None:
         df_raw['PORTERIA_NORMALIZADA'] = df_raw['porteria'].astype(str).str.strip().str.lower()
         df_raw['TIPO_MARCACION'] = df_raw['puntomarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
 
-        # --- Función para asignar Fecha Clave de Turno (CORREGIDA A REGLA ESTRICTA) ---
-        def asignar_fecha_clave_turno_corregida(row):
-            fecha_original = row['FECHA_HORA'].date()
-            hora_marcacion = row['FECHA_HORA'].time()
-            tipo_marcacion = row['TIPO_MARCACION']
-            
-            # Corte de Agrupación: 05:40:00 AM (Regla estricta para forzar T3 continuidad)
-            if tipo_marcacion == 'ent':
-                if hora_marcacion < HORA_INICIO_T1: # 05:40:00
-                    # Cualquier entrada antes de las 05:40 AM se agrupa con el día anterior (T3)
-                    return fecha_original - timedelta(days=1)
-                
-                # Entradas de 05:40:00 en adelante se consideran del día actual (T1/T2)
-                return fecha_original
-            
-            # Lógica existente para SALIDAS
-            if tipo_marcacion == 'sal' and hora_marcacion < HORA_CORTE_NOCTURNO:
-                return fecha_original - timedelta(days=1)
-            
-            return fecha_original
+        # --- CÁLCULO DE ENTRADAS NOCTURNAS DEL DÍA ANTERIOR (NUEVO BLOQUE) ---
+        
+        # 1. Definir el rango nocturno (21:00:00 a 23:59:59)
+        hora_inicio_noche = datetime.strptime("21:00:00", "%H:%M:%S").time()
+        hora_fin_noche = datetime.strptime("23:59:59", "%H:%M:%S").time()
+        
+        # 2. Identificar entradas nocturnas (cualquier entrada dentro de este rango)
+        df_entradas_nocturnas = df_raw[
+            (df_raw['TIPO_MARCACION'] == 'ent') & 
+            (df_raw['FECHA_HORA'].dt.time >= hora_inicio_noche) &
+            (df_raw['FECHA_HORA'].dt.time <= hora_fin_noche)
+        ].copy()
+        
+        # 3. Marcar la fecha posterior a la entrada nocturna (el día al que afectará el T3)
+        df_entradas_nocturnas['FECHA_AFECTADA'] = df_entradas_nocturnas['FECHA_HORA'].dt.normalize() + timedelta(days=1)
+        
+        # 4. Crear el DataFrame de *flags* para la unión
+        # Agrupa para asegurar que solo una entrada nocturna por trabajador/día afectado sea suficiente
+        df_nocturno_flag = df_entradas_nocturnas.groupby(['id_trabajador', 'FECHA_AFECTADA']).size().reset_index(name='COUNT')
+        df_nocturno_flag['Entrada_Nocturna_Dia_Anterior'] = True
+        df_nocturno_flag.drop(columns='COUNT', inplace=True)
 
+        # 5. Unir el flag al DataFrame principal
+        df_raw['FECHA_NORMALIZADA'] = df_raw['FECHA_HORA'].dt.normalize()
+        df_raw = pd.merge(
+            df_raw, 
+            df_nocturno_flag, 
+            how='left', 
+            left_on=['id_trabajador', 'FECHA_NORMALIZADA'], 
+            right_on=['id_trabajador', 'FECHA_AFECTADA']
+        )
+        df_raw['Entrada_Nocturna_Dia_Anterior'] = df_raw['Entrada_Nocturna_Dia_Anterior'].fillna(False)
+        df_raw.drop(columns=['FECHA_NORMALIZADA', 'FECHA_AFECTADA'], inplace=True, errors='ignore')
+        # --- FIN DEL CÁLCULO NOCTURNO PREVIO ---
+
+        # Aplicar la función corregida, que ahora usa la columna 'Entrada_Nocturna_Dia_Anterior'
         df_raw['FECHA_CLAVE_TURNO'] = df_raw.apply(asignar_fecha_clave_turno_corregida, axis=1)
         
         # Filtrado Final del dataset crudo
