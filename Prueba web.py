@@ -212,7 +212,8 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: list, tolerancia_llegada_tarde: int):
     """
     Agrupa por ID y FECHA_CLAVE_TURNO.
-    Aplica la prioridad: 1. Puesto de Trabajo > 2. Portería > 3. Primera Entrada Válida.
+    Lógica mejorada: Busca la mejor entrada entre Puesto/Portería que se asigne a un turno.
+    Prioridad: 1. Mejor Ajuste de Turno (Menor distancia al inicio del turno) > 2. Puesto > 3. Portería.
     """
     
     df_filtrado = df[(df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
@@ -243,52 +244,65 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         # Variables de prioridad de asignación
         mejor_entrada_para_turno = pd.NaT
         mejor_turno_data = (None, None, None, None, None)
-        tipo_marcacion_priorizada = 'N/A' # Nuevo campo para el reporte
+        mejor_distancia_total = timedelta.max # Para encontrar la entrada que mejor se ajusta
+        tipo_marcacion_priorizada = 'N/A' 
 
-        # --- A. Lógica de Priorización de Entradas (Puesto > Portería) ---
+        # --- A. Lógica de Combinación y Priorización de Entradas ---
         
-        # 1. Filtro de entradas por Puesto de Trabajo (PRIORIDAD 1)
+        # 1. Filtro de entradas por Puesto de Trabajo
         entradas_puesto = entradas[
             entradas['PORTERIA_NORMALIZADA'].isin(lugares_puesto)
-        ].sort_values(by='FECHA_HORA')
+        ].assign(PRIORIDAD=1)
         
-        # 2. Filtro de entradas por Portería (PRIORIDAD 2)
+        # 2. Filtro de entradas por Portería
         entradas_porteria = entradas[
             entradas['PORTERIA_NORMALIZADA'].isin(lugares_porteria)
-        ].sort_values(by='FECHA_HORA')
+        ].assign(PRIORIDAD=2)
         
-        candidatos_a_evaluar_df = pd.DataFrame()
+        # 3. Combinar todos los candidatos válidos, ordenando por hora para una iteración más lógica
+        candidatos_a_evaluar_df = pd.concat([entradas_puesto, entradas_porteria]).sort_values(by='FECHA_HORA')
 
-        if not entradas_puesto.empty:
-            # PRIORIDAD MÁXIMA: Puestos de Trabajo
-            candidatos_a_evaluar_df = entradas_puesto
-            tipo_marcacion_priorizada = "Puesto de Trabajo"
-        elif not entradas_porteria.empty:
-            # SEGUNDA PRIORIDAD: Porterías
-            candidatos_a_evaluar_df = entradas_porteria
-            tipo_marcacion_priorizada = "Portería"
-        else:
-            estado_calculo = "Turno No Asignado (No hay entradas válidas en Puesto/Portería)"
-            pass 
-
-        # --- B. Lógica de Selección: Primera Entrada Válida ---
+        
+        # --- B. Lógica de Selección: Mejor Ajuste de Turno ---
         
         if not candidatos_a_evaluar_df.empty:
-            candidatos_a_evaluar_df = candidatos_a_evaluar_df.sort_values(by='FECHA_HORA')
             
             for entrada_row in candidatos_a_evaluar_df.itertuples():
                 current_entry_time = entrada_row.FECHA_HORA
+                current_prioridad = entrada_row.PRIORIDAD
                 
                 # Buscamos el turno al que esta entrada se puede asignar
                 turno_data = obtener_turno_para_registro(current_entry_time, fecha_clave_turno)
                 
                 if turno_data[0] is not None:
-                    # Encontramos la PRIMERA entrada válida que asigna a un turno.
-                    mejor_entrada_para_turno = current_entry_time
-                    mejor_turno_data = turno_data
-                    # Se rompe el bucle para usar la primera entrada encontrada
-                    break 
-
+                    # Se encontró un turno posible. Evaluar la distancia para ver si es la "mejor" entrada.
+                    
+                    # Distancia absoluta de la marcación a la hora de inicio programada del turno asignado
+                    inicio_turno_asignado = turno_data[2]
+                    distancia_a_inicio = abs(current_entry_time - inicio_turno_asignado)
+                    
+                    # 4. Criterio de Selección:
+                    # Elige la marcación que tiene la menor distancia al inicio del turno.
+                    # Si las distancias son iguales, usa la de mayor prioridad (Puesto < Portería).
+                    is_closer = distancia_a_inicio < mejor_distancia_total
+                    
+                    # Desempate: Si la distancia es la misma, la prioridad 1 (Puesto) gana sobre la 2 (Portería)
+                    is_equal_but_higher_priority = (
+                        distancia_a_inicio == mejor_distancia_total and 
+                        current_prioridad < (mejor_turno_data[0].split()[0] == "Puesto" if mejor_turno_data[0] else 3)
+                    )
+                    
+                    if mejor_turno_data[0] is None or is_closer or is_equal_but_higher_priority:
+                        mejor_distancia_total = distancia_a_inicio
+                        mejor_entrada_para_turno = current_entry_time
+                        mejor_turno_data = turno_data
+                        # Definir el tipo de marcación priorizada para el reporte
+                        if current_prioridad == 1:
+                            tipo_marcacion_priorizada = "Puesto de Trabajo"
+                        else:
+                            tipo_marcacion_priorizada = "Portería"
+                        
+            
         # --- C. Asignación y Cálculo Final ---
         if pd.notna(mejor_entrada_para_turno):
             entrada_real = mejor_entrada_para_turno
@@ -299,8 +313,6 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             porteria_entrada = grupo[grupo['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
             
             # --- Inferencia de Salida ---
-            # Se busca la última salida válida dentro del margen, INDEPENDIENTEMENTE del lugar,
-            # ya que la entrada real ya fue priorizada y seleccionada.
             max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
             
             valid_salidas = salidas[
@@ -510,7 +522,7 @@ def asignar_fecha_clave_turno_corregida(row):
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
 st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
-st.caption("La asignación de entrada ahora prioriza la **PRIMERA marcación válida** (Puesto de Trabajo > Portería) que se puede asignar a un turno, utilizando una **agrupación estricta** para eliminar turnos fantasma.")
+st.caption("La asignación de entrada ahora prioriza la **mejor marcación válida** (Puesto o Portería) que mejor se ajusta a la hora de inicio del turno, utilizando una **agrupación estricta** para eliminar turnos fantasma.")
 
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
@@ -684,6 +696,11 @@ if archivo_excel is not None:
                 yellow_format = workbook.add_format({'bg_color': '#FFF2CC', 'font_color': '#3C3C3C'})  
                 red_extra_format = workbook.add_format({'bg_color': '#F8E8E8', 'font_color': '#D83A56', 'bold': True})
                 
+                # Ajustar el ancho de las columnas
+                for i, col in enumerate(df_to_excel.columns):
+                    max_len = max(df_to_excel[col].astype(str).str.len().max() if not df_to_excel[col].empty else len(col), len(col)) + 2
+                    worksheet.set_column(i, i, max_len)
+
                 # Aplicación de formatos condicionales
                 for row_num, row in df_resultado_filtrado.iterrows():
                     try:
@@ -704,7 +721,7 @@ if archivo_excel is not None:
 
                     for col_idx, col_name in enumerate(df_to_excel.columns):
                         value = row[col_name]
-                        cell_format = base_format 
+                        cell_format = base_format  
                         
                         if col_name == 'ENTRADA_REAL' and is_late:
                             cell_format = orange_format
@@ -712,21 +729,22 @@ if archivo_excel is not None:
                         if is_excessive_extra and col_name in ['Horas_Extra', 'Horas', 'Minutos']:
                             cell_format = red_extra_format
 
-                        worksheet.write(excel_row, col_idx, value if pd.notna(value) else 'N/A', cell_format)
+                        # Si el valor es una fecha/hora, debe escribirse como tal para que Excel lo reconozca
+                        if isinstance(value, str) and (col_name in ['ENTRADA_REAL', 'SALIDA_REAL']):
+                            worksheet.write_string(excel_row, col_idx, value, cell_format)
+                        elif pd.isna(value) or value == 'N/A':
+                            worksheet.write_string(excel_row, col_idx, 'N/A', cell_format)
+                        else:
+                            worksheet.write(excel_row, col_idx, value, cell_format)
 
-                # Ajustar el ancho de las columnas
-                for i, col in enumerate(df_to_excel.columns):
-                    max_len = max(df_to_excel[col].astype(str).str.len().max(), len(col)) + 2
-                    worksheet.set_column(i, i, max_len)
+                buffer_excel.seek(0)
 
-            buffer_excel.seek(0)
-
-            st.download_button(
-                label="Descargar Reporte de Horas Extra (Excel)",
-                data=buffer_excel,
-                file_name="Reporte_Marcacion_Horas_Extra_Filtrado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+                st.download_button(
+                    label="Descargar Reporte de Horas Extra (Excel)",
+                    data=buffer_excel,
+                    file_name="Reporte_Marcacion_Horas_Extra_Filtrado.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
         else:
             st.warning("No se encontraron jornadas válidas después de aplicar los filtros.")
 
