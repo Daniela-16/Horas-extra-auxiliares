@@ -320,7 +320,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
 
         # --- D. Asignación y Cálculo Final (usando la entrada ganadora) ---
         
-        # >>> INICIO DE LA CORRECCIÓN: Solo se procesa y añade si hay una entrada ganadora.
+        # CORRECCIÓN: Solo se procesa y añade si hay una entrada ganadora.
         if pd.notna(ganador_entrada):
             
             entrada_real = ganador_entrada
@@ -404,7 +404,11 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             # --- Añade los resultados a la lista (Se reporta todo) ---
             ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
             sal_str = salida_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(salida_real) else 'N/A'
+            
+            # CORRECCIÓN: Asegurar que la FECHA se guarde como string con formato YYYY-MM-DD
             report_date = fecha_clave_final if fecha_clave_final else fecha_clave_turno
+            report_date_str = report_date.strftime('%Y-%m-%d')
+            
             inicio_str = inicio_turno.time().strftime("%H:%M:%S") if inicio_turno else 'N/A'
             fin_str = fin_turno.time().strftime("%H:%M:%S") if fin_turno else 'N/A'
             horas_turno_val = info_turno["duracion_hrs"] if info_turno else 0
@@ -412,7 +416,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             resultados.append({
                 'NOMBRE': nombre,
                 'ID_TRABAJADOR': id_trabajador,
-                'FECHA': report_date,
+                'FECHA': report_date_str, # Usar el string formateado
                 'Dia_Semana': report_date.strftime('%A'),
                 'TURNO': turno_nombre if turno_nombre else 'N/A',
                 'Tipo_Marcacion_Priorizada': tipo_marcacion_priorizada, # Nuevo campo de reporte
@@ -431,7 +435,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 'Es_Nocturno': es_nocturno_flag,
                 'Estado_Calculo': estado_calculo # Agregar este campo para el reporte
             })
-        # <<< FIN DE LA CORRECCIÓN
+        # Si no hay entrada ganadora, no se agrega nada al reporte, eliminando filas en blanco.
 
     return pd.DataFrame(resultados)
 
@@ -450,6 +454,7 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
     df_filtrado = df_resultado.copy()
     rows_to_keep_indices = []
     
+    # Nota: FECHA ya es string YYYY-MM-DD
     df_filtrado['FECHA_DATE'] = pd.to_datetime(df_filtrado['FECHA']).dt.date
     df_filtrado['ENTRADA_DT'] = pd.to_datetime(df_filtrado['ENTRADA_REAL'], errors='coerce')
     df_filtrado['SALIDA_DT'] = pd.to_datetime(df_filtrado['SALIDA_REAL'], errors='coerce')
@@ -597,7 +602,15 @@ if archivo_excel is not None:
             st.error("⚠️ ERROR: Después del filtrado por código de trabajador, no quedan registros para procesar.")
             st.stop()
             
-        # Preprocesamiento de Fecha
+        # Preprocesamiento de Fecha - Manejar posibles fechas seriales de Excel (números)
+        def convert_excel_serial_to_date(date_val):
+            # Si es un número grande (> 1), asume que es una fecha serial de Excel.
+            if isinstance(date_val, (int, float)) and date_val > 1: 
+                 # 1899-12-30 es el origen de fecha de Excel
+                 return pd.to_datetime(date_val, unit='D', origin='1899-12-30')
+            return date_val
+
+        df_raw['fecha'] = df_raw['fecha'].apply(convert_excel_serial_to_date)
         df_raw['fecha'] = pd.to_datetime(df_raw['fecha'], errors='coerce')  
         df_raw.dropna(subset=['fecha'], inplace=True)
         
