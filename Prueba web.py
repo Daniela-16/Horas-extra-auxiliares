@@ -5,6 +5,7 @@ import io
 import numpy as np
 
 # --- CÓDIGOS DE TRABAJADORES PERMITIDOS (ACTUALIZADO) ---
+# Se filtra el DataFrame de entrada para incluir SOLAMENTE los registros con estos ID.
 CODIGOS_TRABAJADORES_FILTRO = [
     81169, 82911, 81515, 81744, 82728, 83617, 81594, 81215, 79114, 80531,
     71329, 82383, 79143, 80796, 80795, 79830, 80584, 81131, 79110, 80530,
@@ -203,7 +204,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
     # --- 3. Decisión Final: Retornar el mejor (único grupo) ---
     if mejor_turno_data_general[0] is not None:
         return mejor_turno_data_general
-        
+            
     return (None, None, None, None, None)
 
 # --- 4. Calculo de horas (Lógica modificada para incluir Prioridad de Marcación) ---
@@ -485,12 +486,13 @@ def asignar_fecha_clave_turno_corregida(row):
     if tipo_marcacion == 'ent':
         if hora_marcacion < HORA_INICIO_T1: # Antes de 05:40:00
             
-            # **LÓGICA DE AGREGACIÓN**
-            # Si el flag fue activado, se asume que esta es la continuación del T3.
+            # **NUEVA LÓGICA DE AGREGACIÓN**
+            # Verifica si hay una entrada nocturna el día anterior.
             if row.get('Entrada_Nocturna_Dia_Anterior', False):
+                 # Si la hay, es la continuidad del T3/desplazamiento. Agrupar al DÍA ANTERIOR.
                 return fecha_original - timedelta(days=1)
             else:
-                # Si no hubo T3, es una entrada temprana para T1. Agrupar al DÍA ACTUAL.
+                # Si no la hay, es una entrada temprana para T1. Agrupar al DÍA ACTUAL.
                 return fecha_original
 
         # Entradas de 05:40:00 en adelante se consideran del día actual (T1/T2)
@@ -589,73 +591,30 @@ if archivo_excel is not None:
         df_raw['PORTERIA_NORMALIZADA'] = df_raw['porteria'].astype(str).str.strip().str.lower()
         df_raw['TIPO_MARCACION'] = df_raw['puntomarcacion'].astype(str).str.strip().str.lower().replace({'entrada': 'ent', 'salida': 'sal'})
 
-        # --- INICIO DEL CÁLCULO DE ENTRADAS NOCTURNAS CORREGIDO (NUEVO BLOQUE) ---
-
+        # --- CÁLCULO DE ENTRADAS NOCTURNAS DEL DÍA ANTERIOR (NUEVO BLOQUE) ---
+        
         # 1. Definir el rango nocturno (21:00:00 a 23:59:59)
         hora_inicio_noche = datetime.strptime("21:00:00", "%H:%M:%S").time()
         hora_fin_noche = datetime.strptime("23:59:59", "%H:%M:%S").time()
         
-        df_raw['FECHA_NORMALIZADA'] = df_raw['FECHA_HORA'].dt.normalize()
-        
-        # Lógica para determinar entradas nocturnas que inician jornada (no son intermedias)
-        # ---------------------------------------------------------------------------------
-        
-        # Ordenamos por trabajador y tiempo para buscar marcaciones previas
-        df_raw.sort_values(by=['id_trabajador', 'FECHA_HORA'], inplace=True)
-        
-        # Identificar todas las entradas nocturnas
+        # 2. Identificar entradas nocturnas (cualquier entrada dentro de este rango)
         df_entradas_nocturnas = df_raw[
             (df_raw['TIPO_MARCACION'] == 'ent') & 
             (df_raw['FECHA_HORA'].dt.time >= hora_inicio_noche) &
             (df_raw['FECHA_HORA'].dt.time <= hora_fin_noche)
         ].copy()
         
-        # 2. Iterar solo sobre las entradas nocturnas candidatas para ver si son la primera del día
-        marcaciones_reales_nocturnas = []
+        # 3. Marcar la fecha posterior a la entrada nocturna (el día al que afectará el T3)
+        df_entradas_nocturnas['FECHA_AFECTADA'] = df_entradas_nocturnas['FECHA_HORA'].dt.normalize() + timedelta(days=1)
         
-        for idx, row in df_entradas_nocturnas.iterrows():
-            current_time = row['FECHA_HORA']
-            current_worker = row['id_trabajador']
-            
-            # Buscar la última marcación *antes* de la actual para el mismo trabajador, en el mismo día
-            # Usamos el DataFrame principal df_raw para buscar marcaciones previas
-            prev_marcaciones = df_raw[
-                (df_raw['id_trabajador'] == current_worker) &
-                (df_raw['FECHA_HORA'] < current_time) &
-                (df_raw['FECHA_NORMALIZADA'] == row['FECHA_NORMALIZADA']) # Mismo día
-            ].sort_values(by='FECHA_HORA', ascending=False)
-            
-            # Si no hay marcaciones anteriores en el mismo día (o si la última es una 'sal'),
-            # asumimos que esta entrada nocturna es el *inicio* de la jornada T3.
-            
-            if prev_marcaciones.empty:
-                # Caso A: Es la primera marcación del día (Inicio T3)
-                marcaciones_reales_nocturnas.append(row)
-            else:
-                last_marcacion_type = prev_marcaciones['TIPO_MARCACION'].iloc[0]
-                
-                # Para evitar falsos T3: Si la última marcación fue una ENTRADA anterior,
-                # esta nueva entrada es intermedia (ej: 13:40 ENT -> 21:55 ENT). No debe activar el flag T3.
-                if last_marcacion_type == 'sal':
-                    # Caso B: La última marcación fue una SALIDA, por lo que esta es un nuevo inicio (Inicio T3)
-                    marcaciones_reales_nocturnas.append(row)
+        # 4. Crear el DataFrame de *flags* para la unión
+        # Agrupa para asegurar que solo una entrada nocturna por trabajador/día afectado sea suficiente
+        df_nocturno_flag = df_entradas_nocturnas.groupby(['id_trabajador', 'FECHA_AFECTADA']).size().reset_index(name='COUNT')
+        df_nocturno_flag['Entrada_Nocturna_Dia_Anterior'] = True
+        df_nocturno_flag.drop(columns='COUNT', inplace=True)
 
-
-        if marcaciones_reales_nocturnas:
-            df_nocturno_flag = pd.DataFrame(marcaciones_reales_nocturnas)
-            
-            # 3. Marcar la fecha posterior a la entrada nocturna (el día al que afectará el T3)
-            df_nocturno_flag['FECHA_AFECTADA'] = df_nocturno_flag['FECHA_HORA'].dt.normalize() + timedelta(days=1)
-            
-            # Crear el DataFrame de *flags* para la unión
-            df_nocturno_flag = df_nocturno_flag.groupby(['id_trabajador', 'FECHA_AFECTADA']).size().reset_index(name='COUNT')
-            df_nocturno_flag['Entrada_Nocturna_Dia_Anterior'] = True
-            df_nocturno_flag.drop(columns='COUNT', inplace=True)
-        else:
-            df_nocturno_flag = pd.DataFrame(columns=['id_trabajador', 'FECHA_AFECTADA', 'Entrada_Nocturna_Dia_Anterior'])
-
-
-        # 4. Unir el flag al DataFrame principal
+        # 5. Unir el flag al DataFrame principal
+        df_raw['FECHA_NORMALIZADA'] = df_raw['FECHA_HORA'].dt.normalize()
         df_raw = pd.merge(
             df_raw, 
             df_nocturno_flag, 
@@ -665,7 +624,7 @@ if archivo_excel is not None:
         )
         df_raw['Entrada_Nocturna_Dia_Anterior'] = df_raw['Entrada_Nocturna_Dia_Anterior'].fillna(False)
         df_raw.drop(columns=['FECHA_NORMALIZADA', 'FECHA_AFECTADA'], inplace=True, errors='ignore')
-        # --- FIN DEL CÁLCULO NOCTURNO PREVIO CORREGIDO ---
+        # --- FIN DEL CÁLCULO NOCTURNO PREVIO ---
 
         # Aplicar la función corregida, que ahora usa la columna 'Entrada_Nocturna_Dia_Anterior'
         df_raw['FECHA_CLAVE_TURNO'] = df_raw.apply(asignar_fecha_clave_turno_corregida, axis=1)
