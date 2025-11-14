@@ -127,7 +127,7 @@ TOLERANCIA_ASIGNACION_TARDE_MINUTOS = 180 # 3 horas de margen para la asignació
 UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
-VENTAJA_PRIORIDAD_LUGAR_MINUTOS = 60 # NUEVA CONSTANTE: Ventaja de tiempo que se le da al Puesto de Trabajo (1 hora)
+VENTAJA_PRIORIDAD_LUGAR_MINUTOS = 60 # Constante para la prioridad híbrida (1 hora)
 
 
 # --- 3. Obtener turno basado en fecha y hora ---
@@ -405,7 +405,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
             sal_str = salida_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(salida_real) else 'N/A'
             
-            # CORRECCIÓN: Asegurar que la FECHA se guarde como string con formato YYYY-MM-DD
+            # Asegurar que la FECHA se guarde como string con formato YYYY-MM-DD
             report_date = fecha_clave_final if fecha_clave_final else fecha_clave_turno
             report_date_str = report_date.strftime('%Y-%m-%d')
             
@@ -454,7 +454,7 @@ def aplicar_filtro_primer_ultimo_dia(df_resultado):
     df_filtrado = df_resultado.copy()
     rows_to_keep_indices = []
     
-    # Nota: FECHA ya es string YYYY-MM-DD
+    # FORZAR A DATETIME ANTES DE USAR DT.DATE, AUNQUE 'FECHA' SEA STRING YYYY-MM-DD
     df_filtrado['FECHA_DATE'] = pd.to_datetime(df_filtrado['FECHA']).dt.date
     df_filtrado['ENTRADA_DT'] = pd.to_datetime(df_filtrado['ENTRADA_REAL'], errors='coerce')
     df_filtrado['SALIDA_DT'] = pd.to_datetime(df_filtrado['SALIDA_REAL'], errors='coerce')
@@ -708,6 +708,12 @@ if archivo_excel is not None:
                 st.stop()
                 
             # Post-procesamiento para el reporte
+            
+            # CORRECCIÓN DE FORMATO: Asegurar que todas las columnas de tiempo/fecha sean strings para el display/export.
+            df_resultado_filtrado['FECHA'] = df_resultado_filtrado['FECHA'].astype(str)
+            df_resultado_filtrado['ENTRADA_REAL'] = df_resultado_filtrado['ENTRADA_REAL'].astype(str)
+            df_resultado_filtrado['SALIDA_REAL'] = df_resultado_filtrado['SALIDA_REAL'].astype(str)
+            
             df_resultado_filtrado['Estado_Llegada'] = df_resultado_filtrado['Llegada_Tarde_Mas_40_Min'].map({True: 'Tarde', False: 'A tiempo'})
             df_resultado_filtrado.sort_values(by=['NOMBRE', 'FECHA', 'ENTRADA_REAL'], inplace=True)  
             
@@ -778,8 +784,13 @@ if archivo_excel is not None:
                                 write_value = float(value)
                             except (ValueError, TypeError):
                                 write_value = 'N/A' # Si falla la conversión a float, dejar N/A
+                        
+                        # Forzar la escritura como string para las columnas de FECHA/ENTRADA/SALIDA para evitar formato numérico de Excel
+                        if col_name in ['FECHA', 'ENTRADA_REAL', 'SALIDA_REAL']:
+                            worksheet.write_string(excel_row, col_idx, str(write_value), format_to_use)
+                        else:
+                            worksheet.write(excel_row, col_idx, write_value, format_to_use)
 
-                        worksheet.write(excel_row, col_idx, write_value, format_to_use)
 
                 # Ajustar el ancho de las columnas
                 for i, col in enumerate(df_to_excel.columns):
