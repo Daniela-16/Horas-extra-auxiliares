@@ -232,6 +232,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         entradas = grupo[grupo['TIPO_MARCACION'] == 'ent']
         salidas = grupo[grupo['TIPO_MARCACION'] == 'sal'] 
         
+        # Inicialización de variables de asignación (solo se usarán si se encuentra un ganador)
         entrada_real = pd.NaT
         porteria_entrada = 'N/A'
         salida_real = pd.NaT
@@ -318,6 +319,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 estado_calculo = "Asignado por Prioridad de Lugar (Puesto)"
 
         # --- D. Asignación y Cálculo Final (usando la entrada ganadora) ---
+        
+        # >>> INICIO DE LA CORRECCIÓN: Solo se procesa y añade si hay una entrada ganadora.
         if pd.notna(ganador_entrada):
             
             entrada_real = ganador_entrada
@@ -325,8 +328,12 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             es_nocturno_flag = info_turno.get("nocturno", False)
             
             # Asegurar que se encuentra el lugar de marcación correcto para el reporte
-            porteria_entrada = grupo[grupo['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
-            
+            try:
+                porteria_entrada = grupo[grupo['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
+            except IndexError:
+                porteria_entrada = 'ERROR: No se encontró P. Entrada'
+
+
             # --- Inferencia de Salida ---
             # Se busca la última salida válida dentro del margen, INDEPENDIENTEMENTE del lugar
             max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
@@ -339,11 +346,17 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             if valid_salidas.empty:
                 salida_real = fin_turno
                 porteria_salida = 'ASUMIDA (Falta Salida/Salida Inválida)'
-                estado_calculo = "ASUMIDO (Falta Salida/Salida Inválida)"
+                if not estado_calculo.startswith("Asignado"): 
+                    estado_calculo = "ASUMIDO (Falta Salida/Salida Inválida)"
                 salida_fue_real = False
             else:
                 salida_real = valid_salidas['FECHA_HORA'].max()
-                porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['porteria'].iloc[0]
+                # La marcación de salida debe existir en valid_salidas.
+                try:
+                    porteria_salida = valid_salidas[valid_salidas['FECHA_HORA'] == salida_real]['porteria'].iloc[0]
+                except IndexError:
+                    porteria_salida = 'ERROR: No se encontró P. Salida'
+                    
                 if not estado_calculo.startswith("Asignado"): # No sobrescribir el estado de asignación si ya se definió
                     estado_calculo = "Calculado"
                 salida_fue_real = True
@@ -387,40 +400,38 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
                 horas_turno = info_turno["duracion_hrs"]
                 horas_extra = max(0, round(horas_trabajadas - horas_turno, 2))
 
-        
-        if pd.isna(entrada_real) and not grupo[grupo['TIPO_MARCACION'] == 'sal'].empty:
-            continue
             
-        # --- Añade los resultados a la lista (Se reporta todo) ---
-        ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
-        sal_str = salida_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(salida_real) else 'N/A'
-        report_date = fecha_clave_final if fecha_clave_final else fecha_clave_turno
-        inicio_str = inicio_turno.time().strftime("%H:%M:%S") if inicio_turno else 'N/A'
-        fin_str = fin_turno.time().strftime("%H:%M:%S") if fin_turno else 'N/A'
-        horas_turno_val = info_turno["duracion_hrs"] if info_turno else 0
+            # --- Añade los resultados a la lista (Se reporta todo) ---
+            ent_str = entrada_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(entrada_real) else 'N/A'
+            sal_str = salida_real.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(salida_real) else 'N/A'
+            report_date = fecha_clave_final if fecha_clave_final else fecha_clave_turno
+            inicio_str = inicio_turno.time().strftime("%H:%M:%S") if inicio_turno else 'N/A'
+            fin_str = fin_turno.time().strftime("%H:%M:%S") if fin_turno else 'N/A'
+            horas_turno_val = info_turno["duracion_hrs"] if info_turno else 0
 
-        resultados.append({
-            'NOMBRE': nombre,
-            'ID_TRABAJADOR': id_trabajador,
-            'FECHA': report_date,
-            'Dia_Semana': report_date.strftime('%A'),
-            'TURNO': turno_nombre if turno_nombre else 'N/A',
-            'Tipo_Marcacion_Priorizada': tipo_marcacion_priorizada, # Nuevo campo de reporte
-            'Inicio_Turno_Programado': inicio_str,
-            'Fin_Turno_Programado': fin_str,
-            'Duracion_Turno_Programado_Hrs': horas_turno_val,
-            'ENTRADA_REAL': ent_str,
-            'PORTERIA_ENTRADA': porteria_entrada,
-            'SALIDA_REAL': sal_str,
-            'PORTERIA_SALIDA': porteria_salida,
-            'Horas_Trabajadas_Netas': horas_trabajadas,
-            'Horas_Extra': horas_extra,
-            'Horas': int(horas_extra),
-            'Minutos': round((horas_extra - int(horas_extra)) * 60),
-            'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag,
-            'Es_Nocturno': es_nocturno_flag,
-            'Estado_Calculo': estado_calculo # Agregar este campo para el reporte
-        })
+            resultados.append({
+                'NOMBRE': nombre,
+                'ID_TRABAJADOR': id_trabajador,
+                'FECHA': report_date,
+                'Dia_Semana': report_date.strftime('%A'),
+                'TURNO': turno_nombre if turno_nombre else 'N/A',
+                'Tipo_Marcacion_Priorizada': tipo_marcacion_priorizada, # Nuevo campo de reporte
+                'Inicio_Turno_Programado': inicio_str,
+                'Fin_Turno_Programado': fin_str,
+                'Duracion_Turno_Programado_Hrs': horas_turno_val,
+                'ENTRADA_REAL': ent_str,
+                'PORTERIA_ENTRADA': porteria_entrada,
+                'SALIDA_REAL': sal_str,
+                'PORTERIA_SALIDA': porteria_salida,
+                'Horas_Trabajadas_Netas': horas_trabajadas,
+                'Horas_Extra': horas_extra,
+                'Horas': int(horas_extra),
+                'Minutos': round((horas_extra - int(horas_extra)) * 60),
+                'Llegada_Tarde_Mas_40_Min': llegada_tarde_flag,
+                'Es_Nocturno': es_nocturno_flag,
+                'Estado_Calculo': estado_calculo # Agregar este campo para el reporte
+            })
+        # <<< FIN DE LA CORRECCIÓN
 
     return pd.DataFrame(resultados)
 
