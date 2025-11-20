@@ -128,9 +128,6 @@ UMBRAL_PAGO_ENTRADA_TEMPRANA_MINUTOS = 30
 MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
-# --- NUEVA CONSTANTE: UMBRAL DE RANGO PARA PRIORIDAD (120 minutos = 2 horas) ---
-UMBRAL_RANGO_PRIORIDAD_MINUTOS = 90
-
 
 # --- 3. Obtener turno basado en fecha y hora ---
 
@@ -215,9 +212,7 @@ def obtener_turno_para_registro(fecha_hora_evento: datetime, fecha_clave_turno_r
 def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: list, tolerancia_llegada_tarde: int):
     """
     Agrupa por ID y FECHA_CLAVE_TURNO.
-    Aplica la prioridad: 1. Puesto de Trabajo > 2. Portería.
-    Se añade una regla de rango: Si la primera entrada de Portería y la primera de Puesto
-    están separadas por más de UMBRAL_RANGO_PRIORIDAD_MINUTOS, se elige Portería (la más temprana).
+    Aplica la prioridad: 1. Puesto de Trabajo > 2. Portería > 3. Primera Entrada Válida.
     """
     
     df_filtrado = df[(df['TIPO_MARCACION'].isin(['ent', 'sal']))].copy()
@@ -250,59 +245,33 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
         mejor_turno_data = (None, None, None, None, None)
         tipo_marcacion_priorizada = 'N/A' # Nuevo campo para el reporte
 
-        # --- A. Lógica de Priorización de Entradas (Puesto > Portería con Umbral) ---
+        # --- A. Lógica de Priorización de Entradas (Puesto > Portería) ---
         
-        # 1. Filtros y obtención de la primera marcación en cada grupo
+        # 1. Filtro de entradas por Puesto de Trabajo (PRIORIDAD 1)
         entradas_puesto = entradas[
             entradas['PORTERIA_NORMALIZADA'].isin(lugares_puesto)
         ].sort_values(by='FECHA_HORA')
         
+        # 2. Filtro de entradas por Portería (PRIORIDAD 2)
         entradas_porteria = entradas[
             entradas['PORTERIA_NORMALIZADA'].isin(lugares_porteria)
         ].sort_values(by='FECHA_HORA')
         
         candidatos_a_evaluar_df = pd.DataFrame()
-        
-        primera_puesto = entradas_puesto['FECHA_HORA'].min() if not entradas_puesto.empty else pd.NaT
-        primera_porteria = entradas_porteria['FECHA_HORA'].min() if not entradas_porteria.empty else pd.NaT
 
-        # Lógica de Selección
-        if pd.notna(primera_puesto) and pd.notna(primera_porteria):
-            # Caso 1: Hay marcaciones en ambos lugares
-            
-            # Calcular la diferencia absoluta de tiempo
-            tiempo_diferencia = abs(primera_puesto - primera_porteria)
-            umbral_timedelta = timedelta(minutes=UMBRAL_RANGO_PRIORIDAD_MINUTOS)
-
-            if tiempo_diferencia > umbral_timedelta:
-                # La diferencia es MAYOR al umbral: Se rompe la prioridad y se elige la más temprana.
-                # Como el turno siempre debe iniciar en la más temprana, elegimos la que ocurrió primero.
-                if primera_porteria < primera_puesto:
-                    candidatos_a_evaluar_df = entradas_porteria
-                    tipo_marcacion_priorizada = f"Portería (Rango Roto > {UMBRAL_RANGO_PRIORIDAD_MINUTOS} min)"
-                else:
-                    candidatos_a_evaluar_df = entradas_puesto
-                    tipo_marcacion_priorizada = f"Puesto (Rango Roto > {UMBRAL_RANGO_PRIORIDAD_MINUTOS} min)"
-            else:
-                # La diferencia es MENOR o IGUAL al umbral: Se mantiene la prioridad a Puesto de Trabajo.
-                candidatos_a_evaluar_df = entradas_puesto
-                tipo_marcacion_priorizada = "Puesto de Trabajo (Prioridad Fija)"
-
-        elif pd.notna(primera_puesto):
-            # Caso 2: Solo hay marcaciones en Puesto de Trabajo
+        if not entradas_puesto.empty:
+            # PRIORIDAD MÁXIMA: Puestos de Trabajo
             candidatos_a_evaluar_df = entradas_puesto
             tipo_marcacion_priorizada = "Puesto de Trabajo"
-            
-        elif pd.notna(primera_porteria):
-            # Caso 3: Solo hay marcaciones en Portería
+        elif not entradas_porteria.empty:
+            # SEGUNDA PRIORIDAD: Porterías
             candidatos_a_evaluar_df = entradas_porteria
             tipo_marcacion_priorizada = "Portería"
         else:
-            # Caso 4: No hay entradas en Puesto ni Portería
             estado_calculo = "Turno No Asignado (No hay entradas válidas en Puesto/Portería)"
             pass 
 
-        # --- B. Lógica de Selección: Primera Entrada Válida (dentro del grupo seleccionado) ---
+        # --- B. Lógica de Selección: Primera Entrada Válida ---
         
         if not candidatos_a_evaluar_df.empty:
             candidatos_a_evaluar_df = candidatos_a_evaluar_df.sort_values(by='FECHA_HORA')
@@ -330,6 +299,8 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             porteria_entrada = grupo[grupo['FECHA_HORA'] == entrada_real]['porteria'].iloc[0]
             
             # --- Inferencia de Salida ---
+            # Se busca la última salida válida dentro del margen, INDEPENDIENTEMENTE del lugar,
+            # ya que la entrada real ya fue priorizada y seleccionada.
             max_salida_aceptable = fin_turno + timedelta(hours=MAX_EXCESO_SALIDA_HRS)
             
             valid_salidas = salidas[
@@ -405,7 +376,7 @@ def calcular_turnos(df: pd.DataFrame, lugares_puesto: list, lugares_porteria: li
             'FECHA': report_date,
             'Dia_Semana': report_date.strftime('%A'),
             'TURNO': turno_nombre if turno_nombre else 'N/A',
-            'Tipo_Marcacion_Priorizada': tipo_marcacion_priorizada, # Campo que muestra la nueva regla
+            'Tipo_Marcacion_Priorizada': tipo_marcacion_priorizada, # Nuevo campo de reporte
             'Inicio_Turno_Programado': inicio_str,
             'Fin_Turno_Programado': fin_str,
             'Duracion_Turno_Programado_Hrs': horas_turno_val,
@@ -538,8 +509,8 @@ def asignar_fecha_clave_turno_corregida(row):
 
 st.set_page_config(page_title="Calculadora de Horas Extra", layout="wide")
 st.title("📊 Calculadora de Horas Extra - NOEL")
-st.write(f"Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** La prioridad de marcación (Puesto > Portería) se anula y se toma la más temprana si las dos primeras marcaciones válidas están separadas por más de **{UMBRAL_RANGO_PRIORIDAD_MINUTOS} minutos**.")
-st.caption("La asignación de entrada ahora prioriza la **PRIMERA marcación válida** (Puesto de Trabajo > Portería), a menos que la diferencia horaria sea excesiva, utilizando una **agrupación estricta** para eliminar turnos fantasma.")
+st.write("Sube tu archivo de Excel para calcular las horas extra del personal. **Nota Importante:** El primer y último día del reporte solo se incluyen si cumplen las condiciones de marcación del turno nocturno (Entrada ~22:40, Salida ~05:40).")
+st.caption("La asignación de entrada ahora prioriza la **PRIMERA marcación válida** (Puesto de Trabajo > Portería) que se puede asignar a un turno, utilizando una **agrupación estricta** para eliminar turnos fantasma.")
 
 
 archivo_excel = st.file_uploader("Sube un archivo Excel (.xlsx)", type=["xlsx"])
