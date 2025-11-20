@@ -129,7 +129,7 @@ MIN_DURACION_ACEPTABLE_REAL_SALIDA_HRS = 1
 UMBRAL_HORAS_EXTRA_RESALTAR = 30 / 60 
 
 # --- NUEVA CONSTANTE: UMBRAL DE RANGO PARA PRIORIDAD (120 minutos = 2 horas) ---
-UMBRAL_RANGO_PRIORIDAD_MINUTOS = 120
+UMBRAL_RANGO_PRIORIDAD_MINUTOS = 90
 
 
 # --- 3. Obtener turno basado en fecha y hora ---
@@ -769,4 +769,5 @@ if archivo_excel is not None:
 
 st.markdown("---")
 st.caption("Somos NOEL DE CORAZÓN ❤️ - Herramienta de Cálculo de Turnos y Horas Extra")
+
 
